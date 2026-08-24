@@ -48,4 +48,89 @@ final class LumosSpikeCoreTests: XCTestCase {
     func testDisplaySleepCommandIsAvailable() {
         XCTAssertTrue(DisplaySleepProbe.isAvailable)
     }
+
+    func testDefaultPreferencesUseAgentModeWithoutDisplayLease() {
+        let preferences = LumosPreferences.defaults
+
+        XCTAssertEqual(preferences.selectedProfileID, LumosPreferences.agentProfileID)
+        XCTAssertEqual(preferences.selectedProfile?.name, "Agent 模式")
+        XCTAssertTrue(preferences.activeControls.preventSystemIdleSleep)
+        XCTAssertFalse(preferences.activeControls.preventDisplayIdleSleep)
+        XCTAssertTrue(preferences.activeControls.preferLowPowerMode)
+        XCTAssertFalse(preferences.activeControls.requestClamshellProtection)
+    }
+
+    func testCustomProfileCanBeCreatedSelectedAndDeleted() {
+        var preferences = LumosPreferences.defaults
+        let custom = preferences.duplicateSelectedProfile(name: "夜间构建")
+
+        XCTAssertEqual(preferences.selectedProfileID, custom.id)
+        XCTAssertEqual(preferences.profiles.count, 2)
+
+        preferences.deleteProfile(id: custom.id)
+        XCTAssertEqual(preferences.selectedProfileID, LumosPreferences.agentProfileID)
+        XCTAssertEqual(preferences.profiles.map(\.name), ["Agent 模式"])
+    }
+
+    func testPreferencesStoreRoundTripsAndNormalizesWhitelist() throws {
+        let suite = "ai.lovstudio.lumos.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = LumosPreferencesStore(defaults: defaults)
+        var preferences = LumosPreferences.defaults
+        preferences.watchedApplications = [
+            WatchedApplication(id: "com.example.agent", displayName: "Agent", executablePath: nil),
+            WatchedApplication(id: "com.example.agent", displayName: "Duplicate", executablePath: nil),
+        ]
+        preferences.normalize()
+        try store.save(preferences)
+
+        XCTAssertEqual(store.load(), preferences)
+        XCTAssertEqual(store.load().watchedApplications.count, 1)
+    }
+
+    func testProfileApplicationTargetsAreDeduplicatedAndBoundToKnownApplications() {
+        let application = WatchedApplication(
+            id: "com.example.agent",
+            displayName: "Agent",
+            executablePath: nil
+        )
+        let profile = LumosProfile(
+            name: "Targeted",
+            summary: "Test",
+            controls: LumosPreferences.agentMode.controls,
+            watchedApplicationIDs: [application.id, application.id, "com.example.unknown"]
+        )
+
+        let preferences = LumosPreferences(
+            selectedProfileID: profile.id,
+            activeControls: profile.controls,
+            profiles: [profile],
+            watchedApplications: [application]
+        )
+
+        XCTAssertEqual(preferences.selectedProfile?.watchedApplicationIDs, [application.id])
+    }
+
+    func testLegacyProfileWithoutApplicationTargetsStillDecodes() throws {
+        let profile = LumosPreferences.agentMode
+        let json = """
+        {
+          "id": "\(profile.id.uuidString)",
+          "name": "Agent 模式",
+          "summary": "Legacy",
+          "controls": {
+            "preventDisplayIdleSleep": false,
+            "preventSystemIdleSleep": true,
+            "requestClamshellProtection": false,
+            "preferLowPowerMode": true
+          },
+          "isBuiltIn": true
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(LumosProfile.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.watchedApplicationIDs, [])
+    }
 }
