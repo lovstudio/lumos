@@ -68,6 +68,7 @@ struct LumosSettingsView: View {
 private struct ControlSettingsView: View {
     @ObservedObject var model: LumosAppModel
     @State private var confirmDisplaySleep = false
+    @State private var confirmClamshellMode = false
 
     var body: some View {
         SettingsPage(title: "控制", subtitle: "为当前 Profile 组合原子能力。修改内置方案时，Lumos 会自动创建自定义副本。") {
@@ -96,12 +97,51 @@ private struct ControlSettingsView: View {
 
                 SettingsDivider()
 
-                SettingsUnavailableRow(
+                SettingsToggleRow(
                     icon: "laptopcomputer",
-                    title: "防止合盖休眠",
-                    detail: "公共电源断言无法可靠覆盖合盖事件。",
-                    badge: "当前不可用"
+                    title: "防止合盖休眠（实验性）",
+                    detail: model.clamshellModeText,
+                    isOn: Binding(
+                        get: { model.preferences.activeControls.requestClamshellProtection },
+                        set: { enabled in
+                            if enabled {
+                                confirmClamshellMode = true
+                            } else {
+                                model.setClamshellProtection(false)
+                            }
+                        }
+                    )
                 )
+
+                if model.preferences.activeControls.requestClamshellProtection {
+                    SettingsDivider()
+
+                    SettingsPickerRow(
+                        icon: "timer",
+                        title: "最长持续时间",
+                        detail: "到时后由 root watchdog 自动恢复系统休眠。",
+                        selection: Binding(
+                            get: { model.preferences.activeControls.clamshellMaximumDurationMinutes },
+                            set: { model.setClamshellMaximumDuration($0) }
+                        ),
+                        options: [30, 60, 120, 240, 480],
+                        valueLabel: { "\($0) 分钟" }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsPickerRow(
+                        icon: "battery.25percent",
+                        title: "电池安全线",
+                        detail: "使用电池并低于安全线时自动结束合盖模式。",
+                        selection: Binding(
+                            get: { model.preferences.activeControls.clamshellBatteryFloorPercent },
+                            set: { model.setClamshellBatteryFloor($0) }
+                        ),
+                        options: [10, 15, 20, 25, 30, 40, 50],
+                        valueLabel: { "\($0)%" }
+                    )
+                }
             }
 
             SettingsCard(title: "能效") {
@@ -145,6 +185,18 @@ private struct ControlSettingsView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("移动鼠标或按下键盘即可再次点亮。")
+        }
+        .confirmationDialog(
+            "启用实验性合盖模式？",
+            isPresented: $confirmClamshellMode
+        ) {
+            Button("启用实验性模式") {
+                model.setClamshellProtection(true)
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            let controls = model.preferences.activeControls
+            Text("开始守护时需要管理员授权。该设置会阻止所有系统休眠；Lumos 使用独立 watchdog 在退出、异常终止、超时或低电量时恢复。请保持电脑通风。当前系统状态：\(model.clamshellSleepState.detail) 最长 \(controls.clamshellMaximumDurationMinutes) 分钟，电池安全线 \(controls.clamshellBatteryFloorPercent)% 。")
         }
     }
 }
@@ -228,6 +280,10 @@ private struct ProfileSettingsView: View {
                         CapabilityChip(
                             title: "低功耗建议",
                             enabled: model.preferences.activeControls.preferLowPowerMode
+                        )
+                        CapabilityChip(
+                            title: "合盖实验",
+                            enabled: model.preferences.activeControls.requestClamshellProtection
                         )
                     }
 
@@ -353,9 +409,9 @@ private struct CapabilitySettingsView: View {
                 CapabilityRow(
                     icon: "laptopcomputer",
                     title: "合盖休眠",
-                    detail: "系统可覆盖空闲断言，不承诺支持",
-                    status: "不可用",
-                    color: .secondary
+                    detail: "pmset disablesleep + 限时安全 watchdog",
+                    status: model.clamshellSleepState.isSleepDisabled ? "已开启" : "需授权",
+                    color: model.clamshellSleepState.isSleepDisabled ? .green : .orange
                 )
                 SettingsDivider()
                 CapabilityRow(
@@ -445,23 +501,29 @@ private struct SettingsToggleRow: View {
     }
 }
 
-private struct SettingsUnavailableRow: View {
+private struct SettingsPickerRow: View {
     let icon: String
     let title: String
     let detail: String
-    let badge: String
+    @Binding var selection: Int
+    let options: [Int]
+    let valueLabel: (Int) -> String
 
     var body: some View {
         HStack(spacing: 12) {
-            settingsIcon(icon, color: .secondary)
+            settingsIcon(icon)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.callout.weight(.medium))
                 Text(detail).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Text(badge)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+            Picker("", selection: $selection) {
+                ForEach(options, id: \.self) { option in
+                    Text(valueLabel(option)).tag(option)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 120)
         }
         .padding(14)
     }

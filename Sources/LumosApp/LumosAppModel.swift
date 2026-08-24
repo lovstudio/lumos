@@ -16,19 +16,26 @@ final class LumosAppModel: ObservableObject {
     @Published private(set) var displayLeaseActive = false
     @Published private(set) var guardStartedAt: Date?
     @Published private(set) var systemState = SystemStateProbe.snapshot()
+    @Published private(set) var clamshellSleepState: ClamshellSleepSnapshot
     @Published private(set) var runningApplications: [ApplicationCandidate] = []
     @Published private(set) var lastError: String?
 
     var statusDidChange: (() -> Void)?
 
     private let store: LumosPreferencesStore
+    private let clamshellSleepController: ClamshellSleepController
     private var systemAssertion: PowerAssertion?
     private var displayAssertion: PowerAssertion?
     private var refreshTimer: Timer?
 
-    init(store: LumosPreferencesStore = LumosPreferencesStore()) {
+    init(
+        store: LumosPreferencesStore = LumosPreferencesStore(),
+        clamshellSleepController: ClamshellSleepController = ClamshellSleepController()
+    ) {
         self.store = store
+        self.clamshellSleepController = clamshellSleepController
         self.preferences = store.load()
+        self.clamshellSleepState = clamshellSleepController.reconcileStaleSession()
         refreshAll()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -50,6 +57,12 @@ final class LumosAppModel: ObservableObject {
 
     var statusText: String {
         guard isGuardActive else { return "守护已暂停" }
+        if preferences.activeControls.requestClamshellProtection,
+           clamshellSleepState.isSleepDisabled {
+            return clamshellSleepState.ownership == .lumos
+                ? "实验性合盖守护正在运行"
+                : "合盖守护正在运行，由外部设置提供"
+        }
         return switch (systemLeaseActive, displayLeaseActive) {
         case (true, true): "任务与显示器正在保持唤醒"
         case (true, false): "任务继续运行，显示器可按时熄灭"
@@ -72,6 +85,18 @@ final class LumosAppModel: ObservableObject {
         systemState.lowPowerModeEnabled ? "低功耗已开启" : "低功耗未开启"
     }
 
+    var clamshellModeText: String {
+        if clamshellSleepState.isSleepDisabled {
+            return clamshellSleepState.ownership == .lumos
+                ? "已由 Lumos 启用"
+                : "系统已由其他工具启用"
+        }
+        if preferences.activeControls.requestClamshellProtection {
+            return "守护开始时请求管理员授权"
+        }
+        return "实验性 · 需管理员授权"
+    }
+
     var matchedProcessCount: Int {
         let targetIDs = Set(selectedProfile.watchedApplicationIDs)
         return runningApplications
@@ -85,7 +110,22 @@ final class LumosAppModel: ObservableObject {
 
     func refreshAll() {
         systemState = SystemStateProbe.snapshot()
+        let previousClamshellState = clamshellSleepState
+        clamshellSleepState = clamshellSleepController.snapshot()
         refreshRunningApplications()
+
+        if previousClamshellState.ownership == .lumos,
+           !clamshellSleepState.isSleepDisabled,
+           isGuardActive,
+           preferences.activeControls.requestClamshellProtection {
+            lastError = "合盖模式已由安全 watchdog 结束；当前仍保留普通任务守护。"
+        }
+
+        if clamshellSleepState.ownership == .lumos,
+           (systemState.thermalState == .serious || systemState.thermalState == .critical) {
+            stopGuard()
+            lastError = "检测到温度过高，Lumos 已结束合盖模式并恢复系统休眠。"
+        }
     }
 
     func refreshRunningApplications() {
@@ -119,10 +159,29 @@ final class LumosAppModel: ObservableObject {
     }
 
     func startGuard() {
-        let controls = preferences.activeControls
-        guard controls.preventSystemIdleSleep || controls.preventDisplayIdleSleep else {
+        var controls = preferences.activeControls
+        guard controls.preventSystemIdleSleep
+                || controls.preventDisplayIdleSleep
+                || controls.requestClamshellProtection else {
             lastError = "当前方案没有可执行的守护项。请先开启“防止自动锁屏”或“防止空闲休眠”。"
             return
+        }
+
+        if controls.requestClamshellProtection {
+            let transition = clamshellSleepController.activate(
+                maximumDurationMinutes: controls.clamshellMaximumDurationMinutes,
+                batteryFloorPercent: controls.clamshellBatteryFloorPercent
+            )
+            clamshellSleepState = transition.snapshot
+            switch transition.state {
+            case .cancelled, .failed:
+                lastError = transition.message
+                return
+            case .activated, .externallyManaged:
+                controls.preventSystemIdleSleep = true
+            case .deactivated:
+                break
+            }
         }
 
         do {
@@ -131,6 +190,9 @@ final class LumosAppModel: ObservableObject {
             lastError = nil
         } catch {
             releaseAllAssertions()
+            if preferences.activeControls.requestClamshellProtection {
+                clamshellSleepState = clamshellSleepController.deactivate().snapshot
+            }
             lastError = String(describing: error)
         }
         statusDidChange?()
@@ -138,6 +200,16 @@ final class LumosAppModel: ObservableObject {
 
     func stopGuard() {
         releaseAllAssertions()
+        if preferences.activeControls.requestClamshellProtection
+            || clamshellSleepState.ownership == .lumos {
+            let transition = clamshellSleepController.deactivate()
+            clamshellSleepState = transition.snapshot
+            if transition.state == .failed {
+                lastError = transition.message
+                statusDidChange?()
+                return
+            }
+        }
         guardStartedAt = nil
         statusDidChange?()
     }
@@ -186,6 +258,35 @@ final class LumosAppModel: ObservableObject {
         ensureEditableProfile()
         mutateSelectedProfile { profile in
             profile.controls[keyPath: keyPath] = value
+        }
+        synchronizeActiveGuard()
+    }
+
+    func setClamshellMaximumDuration(_ minutes: Int) {
+        ensureEditableProfile()
+        mutateSelectedProfile { profile in
+            profile.controls.clamshellMaximumDurationMinutes = minutes
+            profile.controls.normalize()
+        }
+        stopOwnedClamshellAfterSafetySettingChange()
+    }
+
+    func setClamshellBatteryFloor(_ percent: Int) {
+        ensureEditableProfile()
+        mutateSelectedProfile { profile in
+            profile.controls.clamshellBatteryFloorPercent = percent
+            profile.controls.normalize()
+        }
+        stopOwnedClamshellAfterSafetySettingChange()
+    }
+
+    func setClamshellProtection(_ enabled: Bool) {
+        ensureEditableProfile()
+        mutateSelectedProfile { profile in
+            profile.controls.requestClamshellProtection = enabled
+            if enabled {
+                profile.controls.preventSystemIdleSleep = true
+            }
         }
         synchronizeActiveGuard()
     }
@@ -240,12 +341,22 @@ final class LumosAppModel: ObservableObject {
 
     func shutdown() {
         refreshTimer?.invalidate()
-        stopGuard()
+        if isGuardActive || clamshellSleepState.ownership == .lumos {
+            stopGuard()
+        }
     }
 
     private func ensureEditableProfile() {
         guard selectedProfile.isBuiltIn else { return }
         duplicateSelectedProfile()
+    }
+
+    private func stopOwnedClamshellAfterSafetySettingChange() {
+        guard isGuardActive, clamshellSleepState.ownership == .lumos else { return }
+        stopGuard()
+        guard clamshellSleepState.ownership != .lumos else { return }
+        lastError = "合盖安全参数已改变，请重新开始守护并完成管理员授权。"
+        statusDidChange?()
     }
 
     private func mutateSelectedProfile(_ mutation: (inout LumosProfile) -> Void) {
@@ -283,12 +394,32 @@ final class LumosAppModel: ObservableObject {
             return
         }
         let controls = preferences.activeControls
-        guard controls.preventSystemIdleSleep || controls.preventDisplayIdleSleep else {
+        guard controls.preventSystemIdleSleep
+                || controls.preventDisplayIdleSleep
+                || controls.requestClamshellProtection else {
             stopGuard()
             return
         }
+        if !controls.requestClamshellProtection,
+           clamshellSleepState.ownership == .lumos {
+            let transition = clamshellSleepController.deactivate()
+            clamshellSleepState = transition.snapshot
+            if transition.state == .failed {
+                lastError = transition.message
+            }
+        }
+        if controls.requestClamshellProtection,
+           !clamshellSleepState.isSleepDisabled {
+            stopGuard()
+            lastError = "合盖模式设置已改变，请重新开始守护并完成管理员授权。"
+            return
+        }
+        var effectiveControls = controls
+        if controls.requestClamshellProtection {
+            effectiveControls.preventSystemIdleSleep = true
+        }
         do {
-            try synchronizeAssertions(with: controls)
+            try synchronizeAssertions(with: effectiveControls)
             lastError = nil
         } catch {
             lastError = String(describing: error)

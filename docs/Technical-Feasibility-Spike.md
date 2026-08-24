@@ -20,7 +20,8 @@ P1 中有三项不能混入 P0 承诺：
 
 - 切换 Low Power Mode：需要管理员权限，且模式集合与机型相关；
 - 内置屏幕亮度：当前 Apple Silicon 内置屏没有暴露旧公开控制路径；
-- 电池合盖持续运行：公开 idle assertion 明确不能阻止 lid-close sleep，不能承诺“合盖必定可用”。
+- 电池合盖持续运行：公开 idle assertion 明确不能阻止 lid-close sleep；管理员级
+  `pmset disablesleep` 可作为实验性实现，但没有稳定公开合同，不能承诺跨版本必定可用。
 
 “随时可达”的 P0 实现应明确为“保持整机必要唤醒”，不是把 Wake for network access 宣传为任意 App 的远程唤醒保证。
 
@@ -81,7 +82,7 @@ Apple 当前官方电源模式文档列出的设备已经横跨 M1 至 M5，但 
 | 内置显示器亮度写入 | `experimental` | M3 Pro 上 `IODisplayConnect` 为空；仅内部 registry 可读，setter unsupported | P1 继续矩阵，不用私有 API发布 |
 | 第三方外显亮度 | `experimental` | DDC/CI、USB、Thunderbolt 能力不一致 | 作为独立 provider，不做统一承诺 |
 | 官方闭盖外显模式 | `permission` | 需要外显、键鼠/触控板与已允许的附件；部分机型还要求供电 | 只识别条件，不由 Lumos“解锁” |
-| 电池合盖持续任务 | `unsupported` | idle assertion 明确不阻止 lid close；私有/机型路径不稳定 | 不进入 P0/P1 的稳定承诺 |
+| 电池合盖持续任务 | `permission + experimental` | idle assertion 不阻止 lid close；`pmset disablesleep` 需 root，本机可回读，属于未稳定公开的全局设置 | P1 实验性；限时、低电量、崩溃 watchdog，逐机型验证 |
 
 ## 4. 关键技术结论
 
@@ -138,7 +139,12 @@ Lumos 的 P0 行为：
 
 P0“随时可达”使用 system idle lease 保持必要唤醒，并如实显示耗电；Wake for network 只做配置解释。
 
-Apple Silicon MacBook 的官方闭盖使用也依赖已允许的外接显示器、鼠标和键盘；Apple 的部分机型说明还要求外接供电。参考：[Allow accessories to connect](https://support.apple.com/en-gb/102282)、[M3 dual displays with lid closed](https://support.apple.com/en-gb/117373)。Lumos 不绕过 lid-close sleep，也不承诺电池合盖。
+Apple Silicon MacBook 的官方闭盖使用依赖已允许的外接显示器、鼠标和键盘；Apple 的部分机型说明还要求外接供电。参考：[Allow accessories to connect](https://support.apple.com/en-gb/102282)、[M3 dual displays with lid closed](https://support.apple.com/en-gb/117373)。
+
+进一步事实核验确认：管理员级 `pmset -a disablesleep 1` 可以形成公开 assertion 之外的反例，
+但它修改系统级 `SleepDisabled`、需要 root、影响所有休眠，且不在当前 `pmset(1)` 稳定设置列表中。
+因此 Lumos 只以实验性能力提供，并要求真实回读、所有权隔离、限时/低电量 root watchdog 和
+崩溃恢复。完整证据见 [合盖守护事实核验](Clamshell-Mode-Fact-Check.md)。
 
 ## 5. 推荐的最小架构
 
@@ -239,7 +245,7 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 在进入完整 App 开发前，建议确认以下三项：
 
 1. 首版支持 Apple Silicon + macOS 14+；
-2. P0 不切换 Low Power Mode、不调亮度、不提供电池合盖保证；
+2. P0 不切换 Low Power Mode、不调亮度；合盖守护仅作为 P1 权限型实验能力，不提供跨版本保证；
 3. “随时可达”P0 明确定义为保持整机必要唤醒，Wake for network 只做设置解释。
 
 这三项不会削弱 Lumos 的核心价值；它们把已验证的任务连续性与尚未稳定的系统控制分开，保证 UI 的每个绿色状态都有真实依据。

@@ -4,18 +4,66 @@ public struct AtomicControlPreferences: Codable, Equatable, Sendable {
     public var preventDisplayIdleSleep: Bool
     public var preventSystemIdleSleep: Bool
     public var requestClamshellProtection: Bool
+    public var clamshellMaximumDurationMinutes: Int
+    public var clamshellBatteryFloorPercent: Int
     public var preferLowPowerMode: Bool
 
     public init(
         preventDisplayIdleSleep: Bool,
         preventSystemIdleSleep: Bool,
         requestClamshellProtection: Bool,
+        clamshellMaximumDurationMinutes: Int = 120,
+        clamshellBatteryFloorPercent: Int = 20,
         preferLowPowerMode: Bool
     ) {
         self.preventDisplayIdleSleep = preventDisplayIdleSleep
         self.preventSystemIdleSleep = preventSystemIdleSleep
         self.requestClamshellProtection = requestClamshellProtection
+        self.clamshellMaximumDurationMinutes = clamshellMaximumDurationMinutes
+        self.clamshellBatteryFloorPercent = clamshellBatteryFloorPercent
         self.preferLowPowerMode = preferLowPowerMode
+        normalize()
+    }
+
+    public mutating func normalize() {
+        clamshellMaximumDurationMinutes = min(max(clamshellMaximumDurationMinutes, 15), 480)
+        clamshellBatteryFloorPercent = min(max(clamshellBatteryFloorPercent, 10), 50)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case preventDisplayIdleSleep
+        case preventSystemIdleSleep
+        case requestClamshellProtection
+        case clamshellMaximumDurationMinutes
+        case clamshellBatteryFloorPercent
+        case preferLowPowerMode
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        preventDisplayIdleSleep = try container.decode(Bool.self, forKey: .preventDisplayIdleSleep)
+        preventSystemIdleSleep = try container.decode(Bool.self, forKey: .preventSystemIdleSleep)
+        requestClamshellProtection = try container.decode(Bool.self, forKey: .requestClamshellProtection)
+        clamshellMaximumDurationMinutes = try container.decodeIfPresent(
+            Int.self,
+            forKey: .clamshellMaximumDurationMinutes
+        ) ?? 120
+        clamshellBatteryFloorPercent = try container.decodeIfPresent(
+            Int.self,
+            forKey: .clamshellBatteryFloorPercent
+        ) ?? 20
+        preferLowPowerMode = try container.decode(Bool.self, forKey: .preferLowPowerMode)
+        normalize()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(preventDisplayIdleSleep, forKey: .preventDisplayIdleSleep)
+        try container.encode(preventSystemIdleSleep, forKey: .preventSystemIdleSleep)
+        try container.encode(requestClamshellProtection, forKey: .requestClamshellProtection)
+        try container.encode(clamshellMaximumDurationMinutes, forKey: .clamshellMaximumDurationMinutes)
+        try container.encode(clamshellBatteryFloorPercent, forKey: .clamshellBatteryFloorPercent)
+        try container.encode(preferLowPowerMode, forKey: .preferLowPowerMode)
     }
 }
 
@@ -190,10 +238,16 @@ public struct LumosPreferences: Codable, Equatable, Sendable {
 
         let knownApplicationIDs = Set(watchedApplications.map(\.id))
         for index in profiles.indices {
+            profiles[index].controls.normalize()
             var profileSeen = Set<String>()
             profiles[index].watchedApplicationIDs = profiles[index].watchedApplicationIDs.filter {
                 knownApplicationIDs.contains($0) && profileSeen.insert($0).inserted
             }
+        }
+        if let selected = profiles.first(where: { $0.id == selectedProfileID }) {
+            activeControls = selected.controls
+        } else {
+            activeControls.normalize()
         }
     }
 }

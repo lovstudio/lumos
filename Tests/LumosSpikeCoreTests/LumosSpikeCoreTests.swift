@@ -58,6 +58,8 @@ final class LumosSpikeCoreTests: XCTestCase {
         XCTAssertFalse(preferences.activeControls.preventDisplayIdleSleep)
         XCTAssertTrue(preferences.activeControls.preferLowPowerMode)
         XCTAssertFalse(preferences.activeControls.requestClamshellProtection)
+        XCTAssertEqual(preferences.activeControls.clamshellMaximumDurationMinutes, 120)
+        XCTAssertEqual(preferences.activeControls.clamshellBatteryFloorPercent, 20)
     }
 
     func testCustomProfileCanBeCreatedSelectedAndDeleted() {
@@ -132,5 +134,109 @@ final class LumosSpikeCoreTests: XCTestCase {
 
         let decoded = try JSONDecoder().decode(LumosProfile.self, from: Data(json.utf8))
         XCTAssertEqual(decoded.watchedApplicationIDs, [])
+        XCTAssertEqual(decoded.controls.clamshellMaximumDurationMinutes, 120)
+        XCTAssertEqual(decoded.controls.clamshellBatteryFloorPercent, 20)
+    }
+
+    func testClamshellStatusParserHandlesLivePmsetOutput() {
+        XCTAssertTrue(
+            ClamshellSleepOutputParser.isSleepDisabled(
+                "System-wide power settings:\nCurrently in use:\n SleepDisabled 1\n"
+            )
+        )
+        XCTAssertFalse(
+            ClamshellSleepOutputParser.isSleepDisabled(
+                "System-wide power settings:\nCurrently in use:\n standbydelayhigh 4200\n"
+            )
+        )
+    }
+
+    func testClamshellActivationDoesNotTakeOwnershipOfExternalSetting() {
+        let marker = temporaryMarkerURL()
+        var authorizationCalled = false
+        let controller = ClamshellSleepController(
+            markerURL: marker,
+            processIdentifier: getpid(),
+            statusReader: { "SleepDisabled 1" },
+            privilegedExecutor: { _ in
+                authorizationCalled = true
+                return .succeeded
+            },
+            sleeper: { _ in }
+        )
+
+        let result = controller.activate(maximumDurationMinutes: 120, batteryFloorPercent: 20)
+
+        XCTAssertEqual(result.state, .externallyManaged)
+        XCTAssertEqual(result.snapshot.ownership, .external)
+        XCTAssertFalse(authorizationCalled)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testClamshellActivationBuildsBoundedWatchdogAndRestoresOnStop() throws {
+        let marker = temporaryMarkerURL()
+        defer { try? FileManager.default.removeItem(at: marker.deletingLastPathComponent()) }
+        var command = ""
+        let controller = ClamshellSleepController(
+            markerURL: marker,
+            processIdentifier: 4242,
+            statusReader: {
+                FileManager.default.fileExists(atPath: marker.path)
+                    ? "SleepDisabled 1"
+                    : ""
+            },
+            privilegedExecutor: {
+                command = $0
+                return .succeeded
+            },
+            clock: { Date(timeIntervalSince1970: 1_000) },
+            sleeper: { _ in }
+        )
+
+        let activated = controller.activate(maximumDurationMinutes: 60, batteryFloorPercent: 25)
+        XCTAssertEqual(activated.state, .activated)
+        XCTAssertEqual(activated.snapshot.ownership, .lumos)
+        XCTAssertTrue(command.contains("/usr/bin/pmset -a disablesleep 1"))
+        XCTAssertTrue(command.contains("/usr/bin/pmset -a disablesleep 0"))
+        XCTAssertTrue(command.contains("/bin/kill -0 4242"))
+        XCTAssertTrue(command.contains("/bin/test -f"))
+        XCTAssertTrue(command.contains("-le 25"))
+        XCTAssertTrue(command.contains("4600"))
+
+        let syntaxCheck = Process()
+        syntaxCheck.executableURL = URL(fileURLWithPath: "/bin/sh")
+        syntaxCheck.arguments = ["-n", "-c", command]
+        try syntaxCheck.run()
+        syntaxCheck.waitUntilExit()
+        XCTAssertEqual(syntaxCheck.terminationStatus, 0)
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: "/bin/test"))
+
+        let deactivated = controller.deactivate()
+        XCTAssertEqual(deactivated.state, .deactivated)
+        XCTAssertFalse(deactivated.snapshot.isSleepDisabled)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testClamshellCancelledAuthorizationLeavesNoMarker() {
+        let marker = temporaryMarkerURL()
+        defer { try? FileManager.default.removeItem(at: marker.deletingLastPathComponent()) }
+        let controller = ClamshellSleepController(
+            markerURL: marker,
+            processIdentifier: 4242,
+            statusReader: { "" },
+            privilegedExecutor: { _ in .cancelled },
+            sleeper: { _ in }
+        )
+
+        let result = controller.activate(maximumDurationMinutes: 120, batteryFloorPercent: 20)
+
+        XCTAssertEqual(result.state, .cancelled)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    private func temporaryMarkerURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumos-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("clamshell-session.json")
     }
 }

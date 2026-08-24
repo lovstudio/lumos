@@ -4,6 +4,7 @@ import SwiftUI
 struct LumosMenuView: View {
     @ObservedObject var model: LumosAppModel
     let openSettings: () -> Void
+    @State private var confirmClamshellMode = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -24,6 +25,17 @@ struct LumosMenuView: View {
         }
         .padding(18)
         .frame(width: 390)
+        .confirmationDialog(
+            "启用实验性合盖模式？",
+            isPresented: $confirmClamshellMode
+        ) {
+            Button("启用实验性模式") {
+                model.setClamshellProtection(true)
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(clamshellWarning)
+        }
     }
 
     private var hero: some View {
@@ -79,11 +91,20 @@ struct LumosMenuView: View {
 
                 Divider().padding(.leading, 43)
 
-                LumosUnavailableRow(
+                LumosToggleRow(
                     icon: "laptopcomputer",
                     title: "防止合盖休眠",
-                    detail: "macOS 公共接口暂不支持",
-                    badge: "不可用"
+                    detail: model.clamshellModeText,
+                    isOn: Binding(
+                        get: { model.preferences.activeControls.requestClamshellProtection },
+                        set: { enabled in
+                            if enabled {
+                                confirmClamshellMode = true
+                            } else {
+                                model.setClamshellProtection(false)
+                            }
+                        }
+                    )
                 )
 
                 Divider().padding(.leading, 43)
@@ -231,6 +252,11 @@ struct LumosMenuView: View {
         return "\(model.selectedProfile.name) · \(model.targetApplicationCount) 个应用"
     }
 
+    private var clamshellWarning: String {
+        let controls = model.preferences.activeControls
+        return "开始守护时 macOS 会请求管理员授权。Lumos 将在 \(controls.clamshellMaximumDurationMinutes) 分钟后、退出或异常终止时自动恢复；使用电池时低于 \(controls.clamshellBatteryFloorPercent)% 也会恢复。请勿放入密闭包内运行。"
+    }
+
     private func elapsedText(at date: Date) -> String {
         guard let start = model.guardStartedAt else { return "—" }
         let total = max(Int(date.timeIntervalSince(start)), 0)
@@ -274,33 +300,6 @@ private struct LumosToggleRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-    }
-}
-
-private struct LumosUnavailableRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-    let badge: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            rowIcon(icon)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.callout.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text(badge)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(Color.secondary.opacity(0.1))
-                .clipShape(Capsule())
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
