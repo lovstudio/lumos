@@ -30,6 +30,23 @@ swift test
 Scripts/run-spike.sh
 ```
 
+## 注册到 LovStudio
+
+根目录的 `package.json` 是 LovStudio CLI 的 App 身份与命令适配层；SwiftPM
+仍然是 Lumos 的实际构建系统。
+
+```bash
+npx lovstudio app add ~/projects/lumos
+npx lovstudio app path lumos
+npx lovstudio app lumos test
+npx lovstudio app lumos spike
+npx lovstudio app lumos probe system-state
+```
+
+`lovstudio app` 会根据 `packageManager` 使用 pnpm，并把上述命令转发到
+`package.json` scripts。当前 Spike 还没有完整菜单栏 App，因此没有提供会产生
+误导的 `dev` 启动命令。
+
 单独运行探针：
 
 ```bash
@@ -58,4 +75,3 @@ Scripts/                      可重复验证脚本
 docs/                         PRD、技术结论与验证证据
 visuals/                      交接视觉材料
 ```
-
