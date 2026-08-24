@@ -306,9 +306,163 @@ final class LumosSpikeCoreTests: XCTestCase {
         XCTAssertFalse(result.snapshot.isEnabled)
     }
 
+    func testWakeLeaseEngineSharesAssertionUntilFinalReceiptReleases() throws {
+        var assertions: [FakeWakeAssertion] = []
+        let engine = WakeLeaseEngine { kind, _ in
+            let assertion = FakeWakeAssertion(kind: kind)
+            assertions.append(assertion)
+            return assertion
+        }
+
+        let first = try engine.acquire(kind: .systemIdleSleep, reason: "first")
+        let second = try engine.acquire(kind: .systemIdleSleep, reason: "second")
+
+        XCTAssertEqual(assertions.count, 1)
+        XCTAssertEqual(engine.snapshot().referenceCount(for: .systemIdleSleep), 2)
+
+        try first.release()
+        try first.release()
+        XCTAssertEqual(engine.snapshot().referenceCount(for: .systemIdleSleep), 1)
+        XCTAssertEqual(assertions[0].releaseCount, 0)
+
+        try second.release()
+        XCTAssertFalse(engine.isActive(.systemIdleSleep))
+        XCTAssertEqual(assertions[0].releaseCount, 1)
+    }
+
+    func testWakeLeaseEngineMultiKindReceiptReleasesBothAssertions() throws {
+        var assertions: [PowerAssertionKind: FakeWakeAssertion] = [:]
+        let engine = WakeLeaseEngine { kind, _ in
+            let assertion = FakeWakeAssertion(kind: kind)
+            assertions[kind] = assertion
+            return assertion
+        }
+
+        let receipt = try engine.acquire(
+            kinds: [.systemIdleSleep, .displayIdleSleep],
+            reason: "combined"
+        )
+
+        XCTAssertTrue(engine.isActive(.systemIdleSleep))
+        XCTAssertTrue(engine.isActive(.displayIdleSleep))
+        try receipt.release()
+        XCTAssertEqual(assertions[.systemIdleSleep]?.releaseCount, 1)
+        XCTAssertEqual(assertions[.displayIdleSleep]?.releaseCount, 1)
+        XCTAssertEqual(engine.snapshot().referenceCounts, [:])
+    }
+
+    func testWakeLeaseEngineRollsBackPartiallyCreatedAssertions() {
+        var systemAssertion: FakeWakeAssertion?
+        let engine = WakeLeaseEngine { kind, _ in
+            if kind == .displayIdleSleep {
+                throw TestWakeLeaseError.expectedFailure
+            }
+            let assertion = FakeWakeAssertion(kind: kind)
+            systemAssertion = assertion
+            return assertion
+        }
+
+        XCTAssertThrowsError(
+            try engine.acquire(
+                kinds: [.systemIdleSleep, .displayIdleSleep],
+                reason: "must roll back"
+            )
+        )
+        XCTAssertEqual(systemAssertion?.releaseCount, 1)
+        XCTAssertEqual(engine.snapshot().referenceCounts, [:])
+    }
+
+    func testWakeLeaseReceiptDeinitReturnsReference() throws {
+        var assertion: FakeWakeAssertion?
+        let engine = WakeLeaseEngine { kind, _ in
+            let created = FakeWakeAssertion(kind: kind)
+            assertion = created
+            return created
+        }
+
+        var receipt: WakeLeaseReceipt? = try engine.acquire(
+            kind: .displayIdleSleep,
+            reason: "temporary"
+        )
+        XCTAssertNotNil(receipt)
+        XCTAssertTrue(engine.isActive(.displayIdleSleep))
+
+        receipt = nil
+
+        XCTAssertFalse(engine.isActive(.displayIdleSleep))
+        XCTAssertEqual(assertion?.releaseCount, 1)
+    }
+
+    func testWakeLeaseEngineDrivesRealIOKitAssertionLifecycle() throws {
+        let engine = WakeLeaseEngine()
+        let first = try engine.acquire(kind: .systemIdleSleep, reason: "Lumos Engine XCTest 1")
+        let second = try engine.acquire(kind: .systemIdleSleep, reason: "Lumos Engine XCTest 2")
+
+        XCTAssertTrue(engine.isActive(.systemIdleSleep))
+        XCTAssertEqual(engine.snapshot().referenceCount(for: .systemIdleSleep), 2)
+
+        try first.release()
+        XCTAssertTrue(engine.isActive(.systemIdleSleep))
+        try second.release()
+        XCTAssertFalse(engine.isActive(.systemIdleSleep))
+    }
+
+    func testWakeLeaseEngineRejectsInactiveDriverHandle() {
+        let engine = WakeLeaseEngine { kind, _ in
+            FakeWakeAssertion(kind: kind, isActive: false)
+        }
+
+        XCTAssertThrowsError(
+            try engine.acquire(kind: .systemIdleSleep, reason: "inactive")
+        ) { error in
+            XCTAssertEqual(
+                error as? WakeLeaseEngineError,
+                .driverReturnedInactive(.systemIdleSleep)
+            )
+        }
+        XCTAssertEqual(engine.snapshot().referenceCounts, [:])
+    }
+
+    func testWakeLeaseEngineRejectsMismatchedDriverHandle() {
+        let assertion = FakeWakeAssertion(kind: .displayIdleSleep)
+        let engine = WakeLeaseEngine { _, _ in assertion }
+
+        XCTAssertThrowsError(
+            try engine.acquire(kind: .systemIdleSleep, reason: "mismatch")
+        ) { error in
+            XCTAssertEqual(
+                error as? WakeLeaseEngineError,
+                .driverKindMismatch(expected: .systemIdleSleep, actual: .displayIdleSleep)
+            )
+        }
+        XCTAssertEqual(assertion.releaseCount, 1)
+        XCTAssertEqual(engine.snapshot().referenceCounts, [:])
+    }
+
     private func temporaryMarkerURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("lumos-tests-\(UUID().uuidString)", isDirectory: true)
             .appendingPathComponent("clamshell-session.json")
+    }
+}
+
+private enum TestWakeLeaseError: Error {
+    case expectedFailure
+}
+
+private final class FakeWakeAssertion: WakeAssertionHandle {
+    let kind: PowerAssertionKind
+    private(set) var releaseCount = 0
+    private(set) var isActive: Bool
+
+    init(kind: PowerAssertionKind, isActive: Bool = true) {
+        self.kind = kind
+        self.isActive = isActive
+    }
+
+    func release() throws {
+        guard isActive else { return }
+        isActive = false
+        releaseCount += 1
     }
 }

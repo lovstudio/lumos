@@ -1,7 +1,7 @@
 import Foundation
 import IOKit.pwr_mgt
 
-public enum PowerAssertionKind: String, Codable, CaseIterable, Sendable {
+public enum PowerAssertionKind: String, Codable, CaseIterable, Hashable, Sendable {
     case systemIdleSleep = "system"
     case displayIdleSleep = "display"
 
@@ -79,3 +79,11 @@ public final class PowerAssertion: @unchecked Sendable {
         try? release()
     }
 }
+
+public protocol WakeAssertionHandle: AnyObject {
+    var kind: PowerAssertionKind { get }
+    var isActive: Bool { get }
+    func release() throws
+}
+
+extension PowerAssertion: WakeAssertionHandle {}

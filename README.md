@@ -13,6 +13,7 @@ Lumos 是一款面向长时间任务与 Agent 工作流的 macOS 低功耗防休
 
 - P0 核心闭环可行：运行中 App/PID/子进程观察、两类空闲休眠断言、Low Power Mode 与 Thermal State 读取均有公开 API 或 SDK 接口，并已在本机验证。
 - 两类 IOPM Assertion 可以独立创建和释放，且不需要管理员权限。
+- `WakeLeaseEngine` 是进程内唯一 assertion 所有者；多个 receipt 按控制类型共享引用，最后一张归还后才释放系统断言。
 - 立即熄屏可通过系统自带 `pmset displaysleepnow` 完成，本机无需管理员权限；它被隔离在适配器中，需逐 macOS 版本回归。
 - Low Power Mode 切换需要管理员权限；当前 switch 只修改正在使用的电源来源，并在写入后回读真实状态。
 - Apple Silicon 内置屏幕没有暴露旧 `IODisplayConnect` 控制路径；亮度控制仍是实验性能力。

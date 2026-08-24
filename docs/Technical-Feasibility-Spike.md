@@ -206,16 +206,17 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 
 ## 7. 两周 MVP 计划
 
-执行进度：D1 的 `NSStatusItem + SwiftUI` 开发骨架已于 2026-08-24 落地，可通过
-`npx lovstudio app lumos dev` 启动；签名 `.app`、完整状态模型和后续 D2-D10
-仍按下表推进。
+执行进度：D1 的 `NSStatusItem + SwiftUI` 开发骨架已于 2026-08-24 落地；D2 的
+`WakeLeaseEngine`、按类型引用计数、receipt 生命周期和 IOPM driver 已于 2026-08-25
+落地。可通过 `npx lovstudio app lumos dev` 启动；签名 `.app`、完整状态模型和后续
+D3-D10 仍按下表推进。
 
 ### 第 1 周：建立可信的守护闭环
 
 | 天 | 输出 | 验证 |
 | --- | --- | --- |
 | D1 | Xcode App、`NSStatusItem + SwiftUI` 骨架、领域类型 | App 可启动/退出，菜单栏状态可测 |
-| D2 | `WakeLeaseEngine`、引用计数、IOPM driver | 两类断言集成测试；多 lease 不误释放 |
+| D2 | `WakeLeaseEngine`、引用计数、IOPM driver | 已完成：共享 assertion、最终引用释放、失败回滚、析构与真实 IOKit 生命周期测试 |
 | D3 | Workspace/PID/子进程 provider | App 启停、真实命令树、PID 复用测试 |
 | D4 | ProcessInfo、IOPowerSources、NWPath safety monitors | Low Power/Thermal/电源变化状态机测试 |
 | D5 | 任务守护/保持亮屏/随时可达三个 Preset | 从 trigger 到 lease 到 exit 的端到端测试 |

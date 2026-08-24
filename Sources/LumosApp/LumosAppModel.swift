@@ -26,18 +26,20 @@ final class LumosAppModel: ObservableObject {
     private let store: LumosPreferencesStore
     private let clamshellSleepController: ClamshellSleepController
     private let lowPowerModeController: LowPowerModeController
-    private var systemAssertion: PowerAssertion?
-    private var displayAssertion: PowerAssertion?
+    private let wakeLeaseEngine: WakeLeaseEngine
+    private var guardLease: WakeLeaseReceipt?
     private var refreshTimer: Timer?
 
     init(
         store: LumosPreferencesStore = LumosPreferencesStore(),
         clamshellSleepController: ClamshellSleepController = ClamshellSleepController(),
-        lowPowerModeController: LowPowerModeController = LowPowerModeController()
+        lowPowerModeController: LowPowerModeController = LowPowerModeController(),
+        wakeLeaseEngine: WakeLeaseEngine = WakeLeaseEngine()
     ) {
         self.store = store
         self.clamshellSleepController = clamshellSleepController
         self.lowPowerModeController = lowPowerModeController
+        self.wakeLeaseEngine = wakeLeaseEngine
         self.preferences = store.load()
         self.clamshellSleepState = clamshellSleepController.reconcileStaleSession()
         self.lowPowerModeState = lowPowerModeController.snapshot()
@@ -191,11 +193,11 @@ final class LumosAppModel: ObservableObject {
         }
 
         do {
-            try synchronizeAssertions(with: controls)
+            try synchronizeWakeLease(with: controls)
             guardStartedAt = Date()
             lastError = nil
         } catch {
-            releaseAllAssertions()
+            releaseGuardLease()
             if preferences.activeControls.requestClamshellProtection {
                 clamshellSleepState = clamshellSleepController.deactivate().snapshot
             }
@@ -205,7 +207,7 @@ final class LumosAppModel: ObservableObject {
     }
 
     func stopGuard() {
-        releaseAllAssertions()
+        releaseGuardLease()
         if preferences.activeControls.requestClamshellProtection
             || clamshellSleepState.ownership == .lumos {
             let transition = clamshellSleepController.deactivate()
@@ -445,7 +447,7 @@ final class LumosAppModel: ObservableObject {
             effectiveControls.preventSystemIdleSleep = true
         }
         do {
-            try synchronizeAssertions(with: effectiveControls)
+            try synchronizeWakeLease(with: effectiveControls)
             lastError = nil
         } catch {
             lastError = String(describing: error)
@@ -453,42 +455,53 @@ final class LumosAppModel: ObservableObject {
         statusDidChange?()
     }
 
-    private func synchronizeAssertions(with controls: AtomicControlPreferences) throws {
-        if controls.preventSystemIdleSleep, systemAssertion == nil {
-            systemAssertion = try PowerAssertion(
-                kind: .systemIdleSleep,
-                reason: "Lumos task guard - \(selectedProfile.id.uuidString)"
-            )
-        } else if !controls.preventSystemIdleSleep {
-            try systemAssertion?.release()
-            systemAssertion = nil
+    private func synchronizeWakeLease(with controls: AtomicControlPreferences) throws {
+        var kinds = Set<PowerAssertionKind>()
+        if controls.preventSystemIdleSleep {
+            kinds.insert(.systemIdleSleep)
+        }
+        if controls.preventDisplayIdleSleep {
+            kinds.insert(.displayIdleSleep)
         }
 
-        if controls.preventDisplayIdleSleep, displayAssertion == nil {
-            displayAssertion = try PowerAssertion(
-                kind: .displayIdleSleep,
-                reason: "Lumos display guard - \(selectedProfile.id.uuidString)"
-            )
-        } else if !controls.preventDisplayIdleSleep {
-            try displayAssertion?.release()
-            displayAssertion = nil
+        if guardLease?.kinds == kinds {
+            refreshWakeLeaseState()
+            return
         }
 
-        systemLeaseActive = systemAssertion?.isActive == true
-        displayLeaseActive = displayAssertion?.isActive == true
+        guard !kinds.isEmpty else {
+            releaseGuardLease()
+            return
+        }
+
+        let replacement = try wakeLeaseEngine.acquire(
+            kinds: kinds,
+            reason: "Lumos guard - \(selectedProfile.id.uuidString)"
+        )
+        let previous = guardLease
+        guardLease = replacement
+        do {
+            try previous?.release()
+        } catch {
+            refreshWakeLeaseState()
+            throw error
+        }
+        refreshWakeLeaseState()
     }
 
-    private func releaseAllAssertions() {
+    private func releaseGuardLease() {
         do {
-            try systemAssertion?.release()
-            try displayAssertion?.release()
+            try guardLease?.release()
             lastError = nil
         } catch {
             lastError = String(describing: error)
         }
-        systemAssertion = nil
-        displayAssertion = nil
-        systemLeaseActive = false
-        displayLeaseActive = false
+        guardLease = nil
+        refreshWakeLeaseState()
+    }
+
+    private func refreshWakeLeaseState() {
+        systemLeaseActive = wakeLeaseEngine.isActive(.systemIdleSleep)
+        displayLeaseActive = wakeLeaseEngine.isActive(.displayIdleSleep)
     }
 }
