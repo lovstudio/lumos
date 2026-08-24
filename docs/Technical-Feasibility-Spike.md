@@ -107,10 +107,15 @@ Apple 当前官方电源模式文档列出的设备已经横跨 M1 至 M5，但 
 
 `NSWorkspace.runningApplications` 是 App 层快照来源。Apple 文档指出普通 terminate notification 不覆盖后台 App 和 `LSUIElement` App，需要对 `runningApplications` 做 KVO 或快照差分。参考：[NSWorkspace](https://developer.apple.com/documentation/appkit/nsworkspace)、[didTerminateApplicationNotification](https://developer.apple.com/documentation/appkit/nsworkspace/didterminateapplicationnotification)。
 
-正式实现采用两条路径：
+当前 D3 实现采用两条路径：
 
-1. App：Workspace 初始快照 + launch/terminate 事件 + 低频快照校正；
-2. PID：libproc 快照 + `DispatchSourceProcess` 退出事件 + PID/start-time 身份检查。
+1. App：Workspace 初始快照 + launch/terminate 事件触发刷新 + 5 秒低频快照校正；
+2. PID：libproc 基线 + 快照差分 + PID/start-time 身份检查，输出 started、terminated、replaced 三种事件。
+
+当 D5 把白名单扩展为明确的 PID/命令目标后，再为少量已知 PID 增加
+`DispatchSourceProcess` 退出信号以降低延迟；全量进程仍靠低频快照校正，避免为系统中的每个
+PID 建立 source。libproc 读取失败且不能用 `ESRCH` 证明进程已消失时，状态保持
+inaccessible/unknown，不产生 Finished。
 
 只凭进程存在只能产生 Running。Working/Waiting/Finished 必须带 `WorkingRule`：命令存在、子进程模板、阈值窗口、集成上报或用户手动声明。观察权限不足时是 `unknown/degraded`，不是 Finished。
 
@@ -207,9 +212,9 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 ## 7. 两周 MVP 计划
 
 执行进度：D1 的 `NSStatusItem + SwiftUI` 开发骨架已于 2026-08-24 落地；D2 的
-`WakeLeaseEngine`、按类型引用计数、receipt 生命周期和 IOPM driver 已于 2026-08-25
-落地。可通过 `npx lovstudio app lumos dev` 启动；签名 `.app`、完整状态模型和后续
-D3-D10 仍按下表推进。
+`WakeLeaseEngine`、按类型引用计数、receipt 生命周期和 IOPM driver，以及 D3 的
+Workspace/PID/子进程观察层均已于 2026-08-25 落地。可通过
+`npx lovstudio app lumos dev` 启动；签名 `.app`、完整状态模型和后续 D4-D10 仍按下表推进。
 
 ### 第 1 周：建立可信的守护闭环
 
@@ -217,7 +222,7 @@ D3-D10 仍按下表推进。
 | --- | --- | --- |
 | D1 | Xcode App、`NSStatusItem + SwiftUI` 骨架、领域类型 | App 可启动/退出，菜单栏状态可测 |
 | D2 | `WakeLeaseEngine`、引用计数、IOPM driver | 已完成：共享 assertion、最终引用释放、失败回滚、析构与真实 IOKit 生命周期测试 |
-| D3 | Workspace/PID/子进程 provider | App 启停、真实命令树、PID 复用测试 |
+| D3 | Workspace/PID/子进程 provider | 已完成：App 生命周期刷新、真实进程启动/退出、命令树、PID 复用与不可观察语义测试 |
 | D4 | ProcessInfo、IOPowerSources、NWPath safety monitors | Low Power/Thermal/电源变化状态机测试 |
 | D5 | 任务守护/保持亮屏/随时可达三个 Preset | 从 trigger 到 lease 到 exit 的端到端测试 |
 

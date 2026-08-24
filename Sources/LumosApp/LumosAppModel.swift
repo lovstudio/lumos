@@ -7,6 +7,7 @@ struct ApplicationCandidate: Identifiable, Equatable {
     let displayName: String
     let executablePath: String?
     let instanceCount: Int
+    let unobservableInstanceCount: Int
 }
 
 @MainActor
@@ -19,6 +20,7 @@ final class LumosAppModel: ObservableObject {
     @Published private(set) var clamshellSleepState: ClamshellSleepSnapshot
     @Published private(set) var lowPowerModeState: LowPowerModeSnapshot
     @Published private(set) var runningApplications: [ApplicationCandidate] = []
+    @Published private(set) var recentProcessEvents: [ProcessObservationEvent] = []
     @Published private(set) var lastError: String?
 
     var statusDidChange: (() -> Void)?
@@ -27,23 +29,28 @@ final class LumosAppModel: ObservableObject {
     private let clamshellSleepController: ClamshellSleepController
     private let lowPowerModeController: LowPowerModeController
     private let wakeLeaseEngine: WakeLeaseEngine
+    private let processObservationProvider: ProcessObservationProvider
     private var guardLease: WakeLeaseReceipt?
     private var refreshTimer: Timer?
+    private var workspaceObservationTokens: [NSObjectProtocol] = []
 
     init(
         store: LumosPreferencesStore = LumosPreferencesStore(),
         clamshellSleepController: ClamshellSleepController = ClamshellSleepController(),
         lowPowerModeController: LowPowerModeController = LowPowerModeController(),
-        wakeLeaseEngine: WakeLeaseEngine = WakeLeaseEngine()
+        wakeLeaseEngine: WakeLeaseEngine = WakeLeaseEngine(),
+        processObservationProvider: ProcessObservationProvider = ProcessObservationProvider()
     ) {
         self.store = store
         self.clamshellSleepController = clamshellSleepController
         self.lowPowerModeController = lowPowerModeController
         self.wakeLeaseEngine = wakeLeaseEngine
+        self.processObservationProvider = processObservationProvider
         self.preferences = store.load()
         self.clamshellSleepState = clamshellSleepController.reconcileStaleSession()
         self.lowPowerModeState = lowPowerModeController.snapshot()
         refreshAll()
+        observeWorkspaceLifecycle()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshAll()
@@ -137,7 +144,11 @@ final class LumosAppModel: ObservableObject {
     }
 
     func refreshRunningApplications() {
+        let observation = processObservationProvider.sample()
+        recentProcessEvents = observation.events
+        let processesByPID = observation.processesByPID
         var candidates: [String: ApplicationCandidate] = [:]
+        var seenInstances: [String: Set<String>] = [:]
 
         for application in ProcessProbe.runningApplications() {
             guard let displayName = application.localizedName?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -148,12 +159,20 @@ final class LumosAppModel: ObservableObject {
             let id = application.bundleIdentifier
                 ?? application.executablePath
                 ?? "pid:\(application.pid)"
+            let observedProcess = processesByPID[application.pid]
+            let instanceIdentity = observedProcess?.stableIdentity.description
+                ?? "unobservable:\(application.pid)"
+            guard seenInstances[id, default: []].insert(instanceIdentity).inserted else {
+                continue
+            }
             let existing = candidates[id]
             candidates[id] = ApplicationCandidate(
                 id: id,
                 displayName: existing?.displayName ?? displayName,
                 executablePath: existing?.executablePath ?? application.executablePath,
-                instanceCount: (existing?.instanceCount ?? 0) + 1
+                instanceCount: (existing?.instanceCount ?? 0) + 1,
+                unobservableInstanceCount: (existing?.unobservableInstanceCount ?? 0)
+                    + (observedProcess == nil ? 1 : 0)
             )
         }
 
@@ -369,8 +388,30 @@ final class LumosAppModel: ObservableObject {
 
     func shutdown() {
         refreshTimer?.invalidate()
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        workspaceObservationTokens.forEach(notificationCenter.removeObserver)
+        workspaceObservationTokens.removeAll()
         if isGuardActive || clamshellSleepState.ownership == .lumos {
             stopGuard()
+        }
+    }
+
+    private func observeWorkspaceLifecycle() {
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        let names: [NSNotification.Name] = [
+            NSWorkspace.didLaunchApplicationNotification,
+            NSWorkspace.didTerminateApplicationNotification,
+        ]
+        workspaceObservationTokens = names.map { name in
+            notificationCenter.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshRunningApplications()
+                }
+            }
         }
     }
 

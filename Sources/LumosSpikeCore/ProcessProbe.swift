@@ -12,31 +12,64 @@ public struct RunningApplicationSnapshot: Codable, Equatable, Sendable {
     public let ownsMenuBar: Bool
 }
 
+public struct ProcessIdentity: Codable, CustomStringConvertible, Equatable, Hashable, Sendable {
+    public let pid: pid_t
+    public let startTimeSeconds: UInt64
+    public let startTimeMicroseconds: UInt64
+
+    public init(pid: pid_t, startTimeSeconds: UInt64, startTimeMicroseconds: UInt64 = 0) {
+        self.pid = pid
+        self.startTimeSeconds = startTimeSeconds
+        self.startTimeMicroseconds = startTimeMicroseconds
+    }
+
+    public var description: String {
+        "\(pid):\(startTimeSeconds):\(startTimeMicroseconds)"
+    }
+}
+
 public struct ProcessSnapshot: Codable, Equatable, Sendable {
     public let pid: pid_t
     public let parentPID: pid_t
     public let name: String
     public let executablePath: String?
     public let startTimeSeconds: UInt64
+    public let startTimeMicroseconds: UInt64
 
     public init(
         pid: pid_t,
         parentPID: pid_t,
         name: String,
         executablePath: String?,
-        startTimeSeconds: UInt64
+        startTimeSeconds: UInt64,
+        startTimeMicroseconds: UInt64 = 0
     ) {
         self.pid = pid
         self.parentPID = parentPID
         self.name = name
         self.executablePath = executablePath
         self.startTimeSeconds = startTimeSeconds
+        self.startTimeMicroseconds = startTimeMicroseconds
     }
 
     /// PID plus start time is stable enough to detect ordinary PID reuse.
     public var identity: String {
-        "\(pid):\(startTimeSeconds)"
+        stableIdentity.description
     }
+
+    public var stableIdentity: ProcessIdentity {
+        ProcessIdentity(
+            pid: pid,
+            startTimeSeconds: startTimeSeconds,
+            startTimeMicroseconds: startTimeMicroseconds
+        )
+    }
+}
+
+public enum ProcessLookupResult: Equatable, Sendable {
+    case running(ProcessSnapshot)
+    case missing
+    case inaccessible(errorCode: Int32)
 }
 
 public enum ProcessProbe {
@@ -64,14 +97,25 @@ public enum ProcessProbe {
     }
 
     public static func snapshot(pid: pid_t) -> ProcessSnapshot? {
-        guard pid > 0 else { return nil }
+        guard case .running(let snapshot) = lookup(pid: pid) else { return nil }
+        return snapshot
+    }
+
+    public static func lookup(pid: pid_t) -> ProcessLookupResult {
+        guard pid > 0 else { return .missing }
 
         var info = proc_bsdinfo()
         let expectedSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+        errno = 0
         let actualSize = withUnsafeMutablePointer(to: &info) { pointer in
             proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, expectedSize)
         }
-        guard actualSize == expectedSize else { return nil }
+        guard actualSize == expectedSize else {
+            let code = errno
+            return code == ESRCH
+                ? .missing
+                : .inaccessible(errorCode: code)
+        }
 
         let name = withUnsafeBytes(of: info.pbi_name) { bytes -> String in
             let content = bytes.prefix { $0 != 0 }
@@ -88,12 +132,15 @@ public enum ProcessProbe {
             nil
         }
 
-        return ProcessSnapshot(
-            pid: pid_t(bitPattern: info.pbi_pid),
-            parentPID: pid_t(bitPattern: info.pbi_ppid),
-            name: name,
-            executablePath: executablePath,
-            startTimeSeconds: UInt64(info.pbi_start_tvsec)
+        return .running(
+            ProcessSnapshot(
+                pid: pid_t(bitPattern: info.pbi_pid),
+                parentPID: pid_t(bitPattern: info.pbi_ppid),
+                name: name,
+                executablePath: executablePath,
+                startTimeSeconds: UInt64(info.pbi_start_tvsec),
+                startTimeMicroseconds: UInt64(info.pbi_start_tvusec)
+            )
         )
     }
 

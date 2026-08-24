@@ -592,7 +592,7 @@ private struct ApplicationTargetRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(application.displayName)
                     .font(.callout.weight(.medium))
-                Text(application.instanceCount == 1 ? "1 个进程" : "\(application.instanceCount) 个进程")
+                Text(applicationProcessDetail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -613,6 +613,14 @@ private struct ApplicationTargetRow: View {
             path = String(path[..<range.upperBound].dropLast())
         }
         return NSWorkspace.shared.icon(forFile: path)
+    }
+
+    private var applicationProcessDetail: String {
+        let count = application.instanceCount == 1
+            ? "1 个进程"
+            : "\(application.instanceCount) 个进程"
+        guard application.unobservableInstanceCount > 0 else { return count }
+        return "\(count) · \(application.unobservableInstanceCount) 个身份不可读取"
     }
 }
 

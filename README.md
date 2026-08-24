@@ -14,6 +14,7 @@ Lumos 是一款面向长时间任务与 Agent 工作流的 macOS 低功耗防休
 - P0 核心闭环可行：运行中 App/PID/子进程观察、两类空闲休眠断言、Low Power Mode 与 Thermal State 读取均有公开 API 或 SDK 接口，并已在本机验证。
 - 两类 IOPM Assertion 可以独立创建和释放，且不需要管理员权限。
 - `WakeLeaseEngine` 是进程内唯一 assertion 所有者；多个 receipt 按控制类型共享引用，最后一张归还后才释放系统断言。
+- `ProcessObservationProvider` 以 PID + 启动时间区分进程实例，首帧只建立基线，后续输出启动、退出与 PID 复用事件；App 启停同时触发 `NSWorkspace` 即时刷新，并由低频快照校正。
 - 立即熄屏可通过系统自带 `pmset displaysleepnow` 完成，本机无需管理员权限；它被隔离在适配器中，需逐 macOS 版本回归。
 - Low Power Mode 切换需要管理员权限；当前 switch 只修改正在使用的电源来源，并在写入后回读真实状态。
 - Apple Silicon 内置屏幕没有暴露旧 `IODisplayConnect` 控制路径；亮度控制仍是实验性能力。
@@ -58,7 +59,7 @@ npx lovstudio app lumos probe low-power-state
 当前开发界面包括：
 
 - 主面板的防止自动锁屏、合盖能力状态、低功耗模式真实状态与 Agent Profile；
-- 可持久化的原子控制、自定义 Profile，以及按 Profile 保存的运行中 App 白名单；
+- 可持久化的原子控制、自定义 Profile，以及按 Profile 保存的运行中 App 白名单；白名单实例数来自稳定进程身份，权限不足时明确显示身份不可读取；
 - 本次守护时长、真实匹配进程数与功耗对比校准状态；
 - 能力状态页明确区分直接可用、需要授权与当前不可用的功能。
 
@@ -93,7 +94,7 @@ switch 需要管理员授权，且不会覆盖另一种电源来源的既有策�
 Sources/LumosSpikeCore/       可复用的公开 API 探针与领域原型
 Sources/LumosSpike/           命令行入口
 Sources/LumosApp/             AppKit 状态栏与 SwiftUI 开发弹窗
-Tests/LumosSpikeCoreTests/    Core 与断言生命周期测试
+Tests/LumosSpikeCoreTests/    Core、进程观察与断言生命周期测试
 Scripts/                      可重复验证脚本
 docs/                         PRD、技术结论与验证证据
 visuals/                      交接视觉材料

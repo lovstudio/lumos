@@ -22,6 +22,146 @@ final class LumosSpikeCoreTests: XCTestCase {
         XCTAssertEqual(ProcessProbe.descendants(of: 10, in: processes).map(\.pid), [10, 11, 12, 13])
     }
 
+    func testProcessSnapshotDifferDetectsStartTerminateAndPIDReuse() {
+        let previous = [
+            ProcessSnapshot(
+                pid: 10,
+                parentPID: 1,
+                name: "old",
+                executablePath: nil,
+                startTimeSeconds: 100,
+                startTimeMicroseconds: 1
+            ),
+            ProcessSnapshot(pid: 20, parentPID: 1, name: "gone", executablePath: nil, startTimeSeconds: 200),
+        ]
+        let current = [
+            ProcessSnapshot(
+                pid: 10,
+                parentPID: 1,
+                name: "reused",
+                executablePath: nil,
+                startTimeSeconds: 100,
+                startTimeMicroseconds: 2
+            ),
+            ProcessSnapshot(pid: 30, parentPID: 1, name: "new", executablePath: nil, startTimeSeconds: 400),
+        ]
+
+        XCTAssertEqual(
+            ProcessSnapshotDiffer.events(previous: previous, current: current),
+            [
+                .replaced(previous: previous[0], current: current[0]),
+                .terminated(previous[1]),
+                .started(current[1]),
+            ]
+        )
+    }
+
+    func testProcessObservationProviderUsesBaselineAndCanReset() {
+        let first = ProcessSnapshot(
+            pid: 10,
+            parentPID: 1,
+            name: "first",
+            executablePath: nil,
+            startTimeSeconds: 100
+        )
+        let second = ProcessSnapshot(
+            pid: 20,
+            parentPID: 1,
+            name: "second",
+            executablePath: nil,
+            startTimeSeconds: 200
+        )
+        var samples = [[first], [first, second], [second]]
+        let provider = ProcessObservationProvider {
+            samples.removeFirst()
+        }
+
+        let baseline = provider.sample()
+        XCTAssertTrue(baseline.isBaseline)
+        XCTAssertEqual(baseline.events, [])
+
+        let update = provider.sample()
+        XCTAssertFalse(update.isBaseline)
+        XCTAssertEqual(update.events, [.started(second)])
+
+        provider.reset()
+        let resetBaseline = provider.sample()
+        XCTAssertTrue(resetBaseline.isBaseline)
+        XCTAssertEqual(resetBaseline.events, [])
+    }
+
+    func testProcessObservationProviderSeesRealProcessStartAndExit() throws {
+        let provider = ProcessObservationProvider()
+        _ = provider.sample()
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["5"]
+        try process.run()
+        let pid = process.processIdentifier
+        defer {
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
+        }
+
+        XCTAssertTrue(waitForProcessEvent(from: provider) { event in
+            guard case .started(let snapshot) = event else { return false }
+            return snapshot.pid == pid
+        })
+
+        process.terminate()
+        process.waitUntilExit()
+
+        XCTAssertTrue(waitForProcessEvent(from: provider) { event in
+            guard case .terminated(let snapshot) = event else { return false }
+            return snapshot.pid == pid
+        })
+    }
+
+    func testProcessObservationIndexToleratesDuplicatePIDs() {
+        let older = ProcessSnapshot(
+            pid: 10,
+            parentPID: 1,
+            name: "older",
+            executablePath: nil,
+            startTimeSeconds: 100
+        )
+        let newer = ProcessSnapshot(
+            pid: 10,
+            parentPID: 1,
+            name: "newer",
+            executablePath: nil,
+            startTimeSeconds: 200
+        )
+
+        XCTAssertEqual(ProcessSnapshotDiffer.indexByPID([newer, older])[10], newer)
+    }
+
+    func testProcessLookupReturnsStableIdentityForCurrentProcess() throws {
+        guard case .running(let process) = ProcessProbe.lookup(pid: getpid()) else {
+            return XCTFail("Current process should be observable")
+        }
+
+        XCTAssertEqual(process.stableIdentity.pid, getpid())
+        XCTAssertGreaterThan(process.stableIdentity.startTimeSeconds, 0)
+        XCTAssertEqual(process.identity, process.stableIdentity.description)
+    }
+
+    private func waitForProcessEvent(
+        from provider: ProcessObservationProvider,
+        matching predicate: (ProcessObservationEvent) -> Bool
+    ) -> Bool {
+        for _ in 0..<20 {
+            if provider.sample().events.contains(where: predicate) {
+                return true
+            }
+            usleep(25_000)
+        }
+        return false
+    }
+
     func testSystemIdleAssertionCanBeCreatedAndReleased() throws {
         let assertion = try PowerAssertion(kind: .systemIdleSleep, reason: "Lumos Spike XCTest")
         XCTAssertTrue(assertion.isActive)
