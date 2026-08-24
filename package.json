@@ -12,6 +12,7 @@
   ],
   "packageManager": "pnpm@10.33.3",
   "scripts": {
+    "dev": "swift run lumos-app",
     "build": "swift build",
     "build:release": "swift build -c release",
     "test": "swift test",

@@ -4,8 +4,9 @@
 
 Lumos 是一款面向长时间任务与 Agent 工作流的 macOS 低功耗防休眠菜单栏工具。
 
-当前项目处于技术可行性 Spike 阶段。产品定义以 [HANDOFF.md](HANDOFF.md) 和
-[Lumos PRD v0.2](docs/Lumos-PRD-v0.2.md) 为准；此阶段没有把实验性能力包装成完整 App。
+当前项目已完成首轮技术可行性 Spike，并进入 D1 原生菜单栏骨架阶段。产品定义以
+[HANDOFF.md](HANDOFF.md) 和 [Lumos PRD v0.2](docs/Lumos-PRD-v0.2.md)
+为准；实验性能力仍不会包装成稳定产品承诺。
 
 ## 当前结论
 
@@ -38,14 +39,16 @@ Scripts/run-spike.sh
 ```bash
 npx lovstudio app add ~/projects/lumos
 npx lovstudio app path lumos
+npx lovstudio app lumos dev
 npx lovstudio app lumos test
 npx lovstudio app lumos spike
 npx lovstudio app lumos probe system-state
 ```
 
 `lovstudio app` 会根据 `packageManager` 使用 pnpm，并把上述命令转发到
-`package.json` scripts。当前 Spike 还没有完整菜单栏 App，因此没有提供会产生
-误导的 `dev` 启动命令。
+`package.json` scripts。`dev` 会启动原生 AppKit 状态栏进程与 SwiftUI 弹窗；
+它是单实例 MVP 开发骨架，不是已签名或可发布的 `.app` 包。再次运行 `dev` 会
+明确提示已有实例，而不会创建第二个菜单栏图标。
 
 单独运行探针：
 
@@ -70,6 +73,7 @@ npx lovstudio app lumos probe system-state
 ```text
 Sources/LumosSpikeCore/       可复用的公开 API 探针与领域原型
 Sources/LumosSpike/           命令行入口
+Sources/LumosApp/             AppKit 状态栏与 SwiftUI 开发弹窗
 Tests/LumosSpikeCoreTests/    Core 与断言生命周期测试
 Scripts/                      可重复验证脚本
 docs/                         PRD、技术结论与验证证据

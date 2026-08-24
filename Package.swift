@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "LumosSpikeCore", targets: ["LumosSpikeCore"]),
         .executable(name: "lumos-spike", targets: ["LumosSpike"]),
+        .executable(name: "lumos-app", targets: ["LumosApp"]),
     ],
     targets: [
         .target(
@@ -24,10 +25,17 @@ let package = Package(
             name: "LumosSpike",
             dependencies: ["LumosSpikeCore"]
         ),
+        .executableTarget(
+            name: "LumosApp",
+            dependencies: ["LumosSpikeCore"],
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("SwiftUI"),
+            ]
+        ),
         .testTarget(
             name: "LumosSpikeCoreTests",
             dependencies: ["LumosSpikeCore"]
         ),
     ]
 )
-
