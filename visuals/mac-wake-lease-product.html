@@ -1,0 +1,86 @@
+<div id="wake-lease-product">
+  <div class="product-shell">
+    <div class="product-bar">
+      <div class="viz-row">
+        <i data-lucide="moon-star" aria-hidden="true"></i>
+        <strong>Lumos</strong>
+        <span class="viz-badge">3 份租约</span>
+      </div>
+      <span class="text-small text-muted">电池 68% · 温度正常</span>
+    </div>
+
+    <div class="lease-list" aria-label="当前唤醒租约">
+      <button class="btn lease-row is-selected" type="button" aria-pressed="true" data-item="agent">
+        <span class="lease-icon"><i data-lucide="bot" aria-hidden="true"></i></span>
+        <span><strong>ChatGPT · 2 个 Agent</strong><small>1 个执行中，1 个等待批准</small></span>
+        <span class="lease-state">继续</span>
+      </button>
+      <button class="btn lease-row" type="button" aria-pressed="false" data-item="video">
+        <span class="lease-icon"><i data-lucide="clapperboard" aria-hidden="true"></i></span>
+        <span><strong>Screen Studio 导出</strong><small>编码中 · 功耗较高</small></span>
+        <span class="lease-state">继续</span>
+      </button>
+      <button class="btn lease-row" type="button" aria-pressed="false" data-item="remote">
+        <span class="lease-icon"><i data-lucide="smartphone" aria-hidden="true"></i></span>
+        <span><strong>手机随时连接</strong><small>保持可达 · 当前无流量</small></span>
+        <span class="lease-state">在线</span>
+      </button>
+    </div>
+
+    <div class="card" id="lease-explanation" aria-live="polite">
+      <div class="viz-row"><strong>合盖后会发生什么</strong><span class="viz-badge">已选择 Agent</span></div>
+      <p>屏幕将熄灭；两个 Agent 保持运行。最后一个 Agent 完成后，这份租约会自动释放。</p>
+    </div>
+
+    <div class="product-footer">
+      <label class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" id="low-power-strategy" checked>
+        <span class="form-check-label">电池模式下降低后台并发</span>
+      </label>
+      <button class="btn btn-primary" type="button">完成后休眠</button>
+    </div>
+  </div>
+
+  <style>
+    #wake-lease-product { color: var(--foreground); }
+    #wake-lease-product .product-shell { display: grid; gap: 14px; }
+    #wake-lease-product .product-bar,
+    #wake-lease-product .product-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    #wake-lease-product .lease-list { display: grid; gap: 8px; }
+    #wake-lease-product .lease-row { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; text-align: left; }
+    #wake-lease-product .lease-row > span:nth-child(2) { display: grid; gap: 2px; }
+    #wake-lease-product .lease-row small { color: var(--muted-foreground); }
+    #wake-lease-product .lease-icon { display: inline-flex; }
+    #wake-lease-product .lease-state { color: var(--foreground); }
+    #wake-lease-product .card { display: grid; gap: 8px; }
+    #wake-lease-product .card p { margin: 0; }
+    @media (max-width: 460px) {
+      #wake-lease-product .product-footer { align-items: stretch; flex-direction: column; }
+      #wake-lease-product .btn-primary { width: 100%; }
+    }
+  </style>
+
+  <script>
+    (function () {
+      var root = document.getElementById("wake-lease-product");
+      var details = {
+        agent: { badge: "已选择 Agent", text: "屏幕将熄灭；两个 Agent 保持运行。最后一个 Agent 完成后，这份租约会自动释放。" },
+        video: { badge: "已选择视频导出", text: "Screen Studio 将继续编码。当前功耗较高；热状态升高时会提醒改善通风或暂停可暂停任务。" },
+        remote: { badge: "已选择远程可达", text: "即使当前没有流量，Mac 仍会保持手机可达；这份租约需要由你明确关闭。" }
+      };
+      var rows = root.querySelectorAll("[data-item]");
+      rows.forEach(function (row) {
+        row.addEventListener("click", function () {
+          var key = row.getAttribute("data-item");
+          rows.forEach(function (peer) {
+            var selected = peer === row;
+            peer.classList.toggle("is-selected", selected);
+            peer.setAttribute("aria-pressed", selected ? "true" : "false");
+          });
+          root.querySelector("#lease-explanation .viz-badge").textContent = details[key].badge;
+          root.querySelector("#lease-explanation p").textContent = details[key].text;
+        });
+      });
+    })();
+  </script>
+</div>

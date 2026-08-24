@@ -1,0 +1,90 @@
+<div id="mac-agent-levels">
+  <div class="card" id="level-summary" aria-live="polite">
+    <div class="viz-row">
+      <span class="viz-badge" id="level-kicker">Level 1</span>
+      <strong id="level-title">屏幕熄灭，桌面任务继续</strong>
+    </div>
+    <p id="level-scene">插电或桌面环境；下载、脚本、单次构建。</p>
+    <div class="viz-row text-small">
+      <span><strong>需要：</strong><span id="level-need">空闲休眠断言</span></span>
+      <span><strong>主要边界：</strong><span id="level-risk">任务是否有明确生命周期</span></span>
+    </div>
+  </div>
+
+  <div class="level-axis text-small" aria-hidden="true">
+    <span>桌面 · 单任务 · 插电</span>
+    <span>移动 · 多任务 · 电池</span>
+  </div>
+
+  <div class="viz-grid" role="list" aria-label="六级 Mac 持续运行场景">
+    <button class="btn viz-tile is-selected" type="button" aria-pressed="true" data-level="0" aria-label="第一层：屏幕熄灭，桌面任务继续" data-tooltip="单任务，有明确进程与结束条件">L1<br>熄屏</button>
+    <button class="btn viz-tile" type="button" aria-pressed="false" data-level="1" aria-label="第二层：电池合盖，已知任务继续" data-tooltip="电池、合盖、已知长任务">L2<br>合盖</button>
+    <button class="btn viz-tile" type="button" aria-pressed="false" data-level="2" aria-label="第三层：任务时长不可预估" data-tooltip="不能依赖倒计时">L3<br>未知时长</button>
+    <button class="btn viz-tile" type="button" aria-pressed="false" data-level="3" aria-label="第四层：多个异构任务并行" data-tooltip="多个 Agent、导出与构建并存">L4<br>多任务</button>
+    <button class="btn viz-tile" type="button" aria-pressed="false" data-level="4" aria-label="第五层：手机随时远程连接" data-tooltip="当前无流量也要保持可达">L5<br>远程可达</button>
+    <button class="btn viz-tile" type="button" aria-pressed="false" data-level="5" aria-label="第六层：书包内移动运行" data-tooltip="电池与温度成为硬边界">L6<br>移动散热</button>
+  </div>
+
+  <svg class="scenario-path" viewBox="0 0 720 86" role="img" aria-label="从简单桌面任务到移动复杂任务，约束逐级增加">
+    <title>约束逐级增加</title>
+    <desc>从左向右，任务语义、远程可达、电池和温度约束依次加入。</desc>
+    <line x1="40" y1="43" x2="680" y2="43" stroke="var(--border)" stroke-width="2"/>
+    <path d="M40 43 C190 43 220 43 330 43 S500 43 680 43" fill="none" stroke="var(--viz-series-1)" stroke-width="4"/>
+    <g fill="var(--card)" stroke="var(--viz-series-1)" stroke-width="3">
+      <circle cx="40" cy="43" r="8"/><circle cx="168" cy="43" r="8"/><circle cx="296" cy="43" r="8"/>
+      <circle cx="424" cy="43" r="8"/><circle cx="552" cy="43" r="8"/><circle cx="680" cy="43" r="8"/>
+    </g>
+    <text x="40" y="72" text-anchor="middle" fill="var(--muted-foreground)">进程</text>
+    <text x="168" y="72" text-anchor="middle" fill="var(--muted-foreground)">合盖</text>
+    <text x="296" y="72" text-anchor="middle" fill="var(--muted-foreground)">任务</text>
+    <text x="424" y="72" text-anchor="middle" fill="var(--muted-foreground)">协调</text>
+    <text x="552" y="72" text-anchor="middle" fill="var(--muted-foreground)">可达</text>
+    <text x="680" y="72" text-anchor="middle" fill="var(--muted-foreground)">物理边界</text>
+  </svg>
+
+  <style>
+    #mac-agent-levels { display: grid; gap: 14px; color: var(--foreground); }
+    #mac-agent-levels .card { display: grid; gap: 8px; }
+    #mac-agent-levels p { margin: 0; }
+    #mac-agent-levels .level-axis { display: flex; justify-content: space-between; color: var(--muted-foreground); }
+    #mac-agent-levels .viz-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    #mac-agent-levels .viz-tile { min-height: 72px; text-align: center; }
+    #mac-agent-levels .scenario-path { display: block; width: 100%; height: auto; }
+    #mac-agent-levels .scenario-path text { font-size: 12px; }
+    @media (max-width: 560px) {
+      #mac-agent-levels .viz-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      #mac-agent-levels .scenario-path text { font-size: 15px; }
+    }
+  </style>
+
+  <script>
+    (function () {
+      var root = document.getElementById("mac-agent-levels");
+      var levels = [
+        { kicker: "Level 1", title: "屏幕熄灭，桌面任务继续", scene: "插电或桌面环境；下载、脚本、单次构建。", need: "空闲休眠断言", risk: "任务是否有明确生命周期" },
+        { kicker: "Level 2", title: "电池合盖，已知任务继续", scene: "移动前合盖；数小时录屏导出或一次本地 Agent 任务。", need: "合盖策略 + 熄屏 + 低功耗", risk: "续航与通风条件" },
+        { kicker: "Level 3", title: "任务时长不可预估", scene: "Agent 会等待、重试和请求批准，结束时间无法预先设定。", need: "任务完成事件", risk: "倒计时过短中断、过长空耗" },
+        { kicker: "Level 4", title: "多个异构任务并行", scene: "多个 Agent、视频编码、测试与本地服务同时存在。", need: "跨应用租约协调", risk: "重复持有与错误释放" },
+        { kicker: "Level 5", title: "手机必须随时连接", scene: "即使当前没有流量，Mac 仍需等待下一次 Remote 请求。", need: "用户声明的持续可达租约", risk: "无活动时仍需支付在线成本" },
+        { kicker: "Level 6", title: "电脑正在书包里移动", scene: "电池供电、合盖、空间受限；任务连续性进入物理世界。", need: "温度感知 + 动态降载 + 安全退出", risk: "密闭散热与持续高负载不可兼得" }
+      ];
+      var buttons = root.querySelectorAll("[data-level]");
+      buttons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          var index = Number(button.getAttribute("data-level"));
+          var item = levels[index];
+          buttons.forEach(function (peer) {
+            var selected = peer === button;
+            peer.setAttribute("aria-pressed", selected ? "true" : "false");
+            peer.classList.toggle("is-selected", selected);
+          });
+          root.querySelector("#level-kicker").textContent = item.kicker;
+          root.querySelector("#level-title").textContent = item.title;
+          root.querySelector("#level-scene").textContent = item.scene;
+          root.querySelector("#level-need").textContent = item.need;
+          root.querySelector("#level-risk").textContent = item.risk;
+        });
+      });
+    })();
+  </script>
+</div>
