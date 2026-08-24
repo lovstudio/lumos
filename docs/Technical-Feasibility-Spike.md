@@ -73,7 +73,7 @@ Apple 当前官方电源模式文档列出的设备已经横跨 M1 至 M5，但 
 | 防显示器空闲熄灭 | `direct` | `PreventUserIdleDisplaySleep` 独立创建/释放成功 | P0 |
 | Low Power Mode 读取 | `direct` | `ProcessInfo.isLowPowerModeEnabled` 实测成功，可监听通知 | P0 展示与降频 |
 | Thermal State 读取 | `direct` | `ProcessInfo.thermalState` 实测 nominal，可监听通知 | P0 安全降级 |
-| Low Power Mode 切换 | `permission` | `pmset` 非 root 退出 1；Apple 也明确模式随机型变化 | P1；首版不装 Helper |
+| Low Power Mode 切换 | `permission` | `pmset` 非 root 退出 1；Apple 也明确模式随机型变化 | P1 switch；一次性授权、仅当前电源来源、执行后回读 |
 | 当前网络路径 | `direct` | `NWPathMonitor` 实测 Wi-Fi satisfied | P0 状态解释 |
 | 读取 Wake for network 配置 | `direct` | `pmset -g custom` 可读 `womp` | P0 只读说明 |
 | 修改 Wake for network 配置 | `permission` | `pmset` 修改电源设置要求 root | P1，单独授权 |
@@ -120,12 +120,15 @@ Apple 当前官方电源模式文档列出的设备已经横跨 M1 至 M5，但 
 
 Lumos 的 P0 行为：
 
-- Low Power Mode：只读并降低自身采样、动画与非必要网络；
+- Low Power Mode：读取真实状态并降低自身采样、动画与非必要网络；P1 switch 经一次性管理员授权，只修改当前电源来源；
 - thermal fair：降低活动采样频率；
 - thermal serious：提示并撤销非关键 display lease；
 - thermal critical：释放可撤销 lease，把决策交还系统，并明确说明任务连续性可能中断。
 
-切换 Low Power Mode 不进入 P0。本机实测 `/usr/bin/pmset` 修改需要 root；若未来引入 Helper，必须单独做 threat model、安装/卸载/回滚和用户授权 UX。
+切换 Low Power Mode 不进入 P0。本机实测 `/usr/bin/pmset` 修改需要 root；当前 P1 switch
+通过固定命令的一次性管理员授权执行，根据实时电源来源选择 `-b`、`-c` 或 `-u`，避免用
+`-a` 覆盖另一套策略，并在执行后回读。若未来引入 Helper，仍必须单独做 threat model、
+安装/卸载/回滚和用户授权 UX。
 
 ### 4.4 熄屏与亮度
 
@@ -197,7 +200,9 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 4. 重新观察目标并要求规则重新满足，才创建新 lease；
 5. UI 明确显示“已恢复观察”或“上次守护已中断”，不伪造连续保护。
 
-未来若修改持久系统设置，必须额外保存 before/desired/applied 三态并提供独立 repair tool；这也是 P0 不引入 Low Power Mode 切换的原因。
+合盖这类会在退出时恢复的系统设置必须保存 before/desired/applied 三态并提供 repair 路径。
+低功耗 switch 则被定义为用户主动修改当前电源来源的系统偏好，不在 App 退出时自动反转；
+取消授权或回读失败时，UI 保持系统真实状态。
 
 ## 7. 两周 MVP 计划
 
@@ -245,7 +250,7 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 在进入完整 App 开发前，建议确认以下三项：
 
 1. 首版支持 Apple Silicon + macOS 14+；
-2. P0 不切换 Low Power Mode、不调亮度；合盖守护仅作为 P1 权限型实验能力，不提供跨版本保证；
+2. P0 不自动切换 Low Power Mode、不调亮度；低功耗 switch 与合盖守护均作为 P1 权限型能力，后者不提供跨版本保证；
 3. “随时可达”P0 明确定义为保持整机必要唤醒，Wake for network 只做设置解释。
 
 这三项不会削弱 Lumos 的核心价值；它们把已验证的任务连续性与尚未稳定的系统控制分开，保证 UI 的每个绿色状态都有真实依据。

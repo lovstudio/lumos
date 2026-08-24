@@ -147,22 +147,12 @@ private struct ControlSettingsView: View {
             SettingsCard(title: "能效") {
                 SettingsToggleRow(
                     icon: "leaf.fill",
-                    title: "建议启用低功耗模式",
-                    detail: "保存为 Profile 偏好；实际切换仍由系统设置完成。",
+                    title: "低功耗模式",
+                    detail: model.powerModeText,
                     isOn: Binding(
-                        get: { model.preferences.activeControls.preferLowPowerMode },
-                        set: { model.setControl(\.preferLowPowerMode, to: $0) }
+                        get: { model.lowPowerModeState.isEnabled },
+                        set: { model.setLowPowerMode($0) }
                     )
-                )
-
-                SettingsDivider()
-
-                SettingsStatusRow(
-                    icon: "battery.75percent",
-                    title: "系统低功耗模式",
-                    detail: "Lumos 仅读取真实系统状态，不伪装切换结果。",
-                    value: model.systemState.lowPowerModeEnabled ? "已开启" : "未开启",
-                    valueColor: model.systemState.lowPowerModeEnabled ? .green : .secondary
                 )
             }
 
@@ -278,7 +268,7 @@ private struct ProfileSettingsView: View {
                             enabled: model.preferences.activeControls.preventDisplayIdleSleep
                         )
                         CapabilityChip(
-                            title: "低功耗建议",
+                            title: "低功耗",
                             enabled: model.preferences.activeControls.preferLowPowerMode
                         )
                         CapabilityChip(
@@ -417,9 +407,9 @@ private struct CapabilitySettingsView: View {
                 CapabilityRow(
                     icon: "leaf.fill",
                     title: "切换低功耗模式",
-                    detail: "需要管理员权限或特权辅助程序",
-                    status: "需授权",
-                    color: .orange
+                    detail: "仅修改当前电源来源，执行后真实回读",
+                    status: model.lowPowerModeState.isEnabled ? "已开启" : "需授权",
+                    color: model.lowPowerModeState.isEnabled ? .green : .orange
                 )
                 SettingsDivider()
                 CapabilityRow(
@@ -524,29 +514,6 @@ private struct SettingsPickerRow: View {
             }
             .labelsHidden()
             .frame(width: 120)
-        }
-        .padding(14)
-    }
-}
-
-private struct SettingsStatusRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-    let value: String
-    let valueColor: Color
-
-    var body: some View {
-        HStack(spacing: 12) {
-            settingsIcon(icon)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.callout.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(valueColor)
         }
         .padding(14)
     }

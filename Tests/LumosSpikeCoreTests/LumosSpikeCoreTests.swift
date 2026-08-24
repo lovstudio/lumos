@@ -234,6 +234,78 @@ final class LumosSpikeCoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
     }
 
+    func testLowPowerModeParserReadsCurrentStateAndPowerSource() {
+        XCTAssertEqual(
+            LowPowerModeOutputParser.isEnabled("Currently in use:\n lowpowermode 1\n"),
+            true
+        )
+        XCTAssertEqual(
+            LowPowerModeOutputParser.powerSource("Now drawing from 'AC Power'\n"),
+            .acPower
+        )
+        XCTAssertEqual(
+            LowPowerModeOutputParser.powerSource("Now drawing from 'Battery Power'\n"),
+            .battery
+        )
+    }
+
+    func testLowPowerModeChangesOnlyCurrentPowerSourceAndReadsBack() {
+        var enabled = false
+        var command = ""
+        let controller = LowPowerModeController(
+            statusReader: {
+                (
+                    settings: "lowpowermode \(enabled ? 1 : 0)",
+                    battery: "Now drawing from 'AC Power'"
+                )
+            },
+            privilegedExecutor: {
+                command = $0
+                enabled = true
+                return .succeeded
+            },
+            sleeper: { _ in }
+        )
+
+        let result = controller.setEnabled(true)
+
+        XCTAssertEqual(result.state, .updated)
+        XCTAssertTrue(result.snapshot.isEnabled)
+        XCTAssertEqual(command, "/usr/bin/pmset -c lowpowermode 1")
+    }
+
+    func testLowPowerModeDoesNotAuthorizeWhenStateAlreadyMatches() {
+        var authorizationCalled = false
+        let controller = LowPowerModeController(
+            statusReader: {
+                (settings: "lowpowermode 1", battery: "Now drawing from 'Battery Power'")
+            },
+            privilegedExecutor: { _ in
+                authorizationCalled = true
+                return .succeeded
+            }
+        )
+
+        let result = controller.setEnabled(true)
+
+        XCTAssertEqual(result.state, .unchanged)
+        XCTAssertFalse(authorizationCalled)
+    }
+
+    func testLowPowerModeCancelledAuthorizationKeepsLiveState() {
+        let controller = LowPowerModeController(
+            statusReader: {
+                (settings: "lowpowermode 0", battery: "Now drawing from 'AC Power'")
+            },
+            privilegedExecutor: { _ in .cancelled }
+        )
+
+        let result = controller.setEnabled(true)
+
+        XCTAssertEqual(result.state, .cancelled)
+        XCTAssertFalse(result.snapshot.isEnabled)
+    }
+
     private func temporaryMarkerURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("lumos-tests-\(UUID().uuidString)", isDirectory: true)

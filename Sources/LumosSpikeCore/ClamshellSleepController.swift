@@ -1,4 +1,3 @@
-import AppKit
 import Darwin
 import Foundation
 
@@ -32,12 +31,6 @@ public struct ClamshellSleepSnapshot: Codable, Equatable, Sendable {
         ownership: .none,
         detail: "无法读取 macOS 的 SleepDisabled 状态。"
     )
-}
-
-public enum ClamshellPrivilegedExecutionResult: Equatable, Sendable {
-    case succeeded
-    case cancelled
-    case failed(String)
 }
 
 public enum ClamshellSleepTransitionState: String, Equatable, Sendable {
@@ -85,7 +78,7 @@ public enum ClamshellSleepOutputParser {
 /// its configured floor, or Lumos removes its marker during a normal stop.
 public final class ClamshellSleepController {
     public typealias StatusReader = () throws -> String
-    public typealias PrivilegedExecutor = (String) -> ClamshellPrivilegedExecutionResult
+    public typealias PrivilegedExecutor = (String) -> PrivilegedCommandResult
     public typealias Clock = () -> Date
     public typealias Sleeper = (TimeInterval) -> Void
 
@@ -109,7 +102,7 @@ public final class ClamshellSleepController {
             markerURL: Self.defaultMarkerURL,
             processIdentifier: getpid(),
             statusReader: Self.readSystemStatus,
-            privilegedExecutor: Self.executeWithAdministratorPrivileges,
+            privilegedExecutor: PrivilegedCommandExecutor.execute,
             clock: Date.init,
             sleeper: Thread.sleep(forTimeInterval:),
             fileManager: .default
@@ -149,7 +142,7 @@ public final class ClamshellSleepController {
 
             let detail = switch ownership {
             case .lumos: "合盖休眠已由 Lumos 暂时关闭。"
-            case .external: "系统休眠已由其他工具或设置关闭。"
+            case .external: "系统睡眠已关闭，但不是由本次 Lumos 会话开启。"
             case .none: "合盖时仍会按 macOS 默认策略休眠。"
             }
             return ClamshellSleepSnapshot(
@@ -195,7 +188,7 @@ public final class ClamshellSleepController {
                 state: before.ownership == .lumos ? .activated : .externallyManaged,
                 snapshot: before,
                 message: before.ownership == .external
-                    ? "SleepDisabled 已由其他工具开启；Lumos 不会接管或在退出时关闭它。"
+                    ? "系统睡眠已经关闭，但不是由本次 Lumos 会话开启；Lumos 不会接管或在退出时关闭它。"
                     : nil
             )
         }
@@ -264,7 +257,7 @@ public final class ClamshellSleepController {
                 state: before.ownership == .external ? .externallyManaged : .deactivated,
                 snapshot: before,
                 message: before.ownership == .external
-                    ? "SleepDisabled 由其他工具管理，Lumos 未修改该系统设置。"
+                    ? "系统睡眠不是由本次 Lumos 会话关闭，Lumos 未修改该系统设置。"
                     : nil
             )
         }
@@ -360,34 +353,6 @@ public final class ClamshellSleepController {
             )
         }
         return String(decoding: outputData, as: UTF8.self)
-    }
-
-    private static func executeWithAdministratorPrivileges(
-        _ command: String
-    ) -> ClamshellPrivilegedExecutionResult {
-        let source = "do shell script \(appleScriptLiteral(command)) with administrator privileges"
-        guard let script = NSAppleScript(source: source) else {
-            return .failed("无法创建管理员授权请求。")
-        }
-
-        var errorInfo: NSDictionary?
-        _ = script.executeAndReturnError(&errorInfo)
-        guard let errorInfo else { return .succeeded }
-
-        let code = errorInfo[NSAppleScript.errorNumber] as? Int ?? 0
-        if code == -128 {
-            return .cancelled
-        }
-        let message = errorInfo[NSAppleScript.errorMessage] as? String
-            ?? "macOS 拒绝了系统休眠设置变更。"
-        return .failed(message)
-    }
-
-    private static func appleScriptLiteral(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
     }
 
     private static func shellQuote(_ value: String) -> String {

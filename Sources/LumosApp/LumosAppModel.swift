@@ -17,6 +17,7 @@ final class LumosAppModel: ObservableObject {
     @Published private(set) var guardStartedAt: Date?
     @Published private(set) var systemState = SystemStateProbe.snapshot()
     @Published private(set) var clamshellSleepState: ClamshellSleepSnapshot
+    @Published private(set) var lowPowerModeState: LowPowerModeSnapshot
     @Published private(set) var runningApplications: [ApplicationCandidate] = []
     @Published private(set) var lastError: String?
 
@@ -24,18 +25,22 @@ final class LumosAppModel: ObservableObject {
 
     private let store: LumosPreferencesStore
     private let clamshellSleepController: ClamshellSleepController
+    private let lowPowerModeController: LowPowerModeController
     private var systemAssertion: PowerAssertion?
     private var displayAssertion: PowerAssertion?
     private var refreshTimer: Timer?
 
     init(
         store: LumosPreferencesStore = LumosPreferencesStore(),
-        clamshellSleepController: ClamshellSleepController = ClamshellSleepController()
+        clamshellSleepController: ClamshellSleepController = ClamshellSleepController(),
+        lowPowerModeController: LowPowerModeController = LowPowerModeController()
     ) {
         self.store = store
         self.clamshellSleepController = clamshellSleepController
+        self.lowPowerModeController = lowPowerModeController
         self.preferences = store.load()
         self.clamshellSleepState = clamshellSleepController.reconcileStaleSession()
+        self.lowPowerModeState = lowPowerModeController.snapshot()
         refreshAll()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -82,14 +87,14 @@ final class LumosAppModel: ObservableObject {
     }
 
     var powerModeText: String {
-        systemState.lowPowerModeEnabled ? "低功耗已开启" : "低功耗未开启"
+        lowPowerModeState.detail
     }
 
     var clamshellModeText: String {
         if clamshellSleepState.isSleepDisabled {
             return clamshellSleepState.ownership == .lumos
                 ? "已由 Lumos 启用"
-                : "系统已由其他工具启用"
+                : "系统睡眠已关闭 · 非本次 Lumos 控制"
         }
         if preferences.activeControls.requestClamshellProtection {
             return "守护开始时请求管理员授权"
@@ -112,6 +117,7 @@ final class LumosAppModel: ObservableObject {
         systemState = SystemStateProbe.snapshot()
         let previousClamshellState = clamshellSleepState
         clamshellSleepState = clamshellSleepController.snapshot()
+        lowPowerModeState = lowPowerModeController.snapshot()
         refreshRunningApplications()
 
         if previousClamshellState.ownership == .lumos,
@@ -289,6 +295,26 @@ final class LumosAppModel: ObservableObject {
             }
         }
         synchronizeActiveGuard()
+    }
+
+    func setLowPowerMode(_ enabled: Bool) {
+        let transition = lowPowerModeController.setEnabled(enabled)
+        lowPowerModeState = transition.snapshot
+        systemState = SystemStateProbe.snapshot()
+
+        switch transition.state {
+        case .updated, .unchanged:
+            if preferences.activeControls.preferLowPowerMode != enabled {
+                ensureEditableProfile()
+                mutateSelectedProfile { profile in
+                    profile.controls.preferLowPowerMode = enabled
+                }
+            }
+            lastError = nil
+        case .cancelled, .failed:
+            lastError = transition.message
+        }
+        statusDidChange?()
     }
 
     func isApplicationTargeted(_ id: String) -> Bool {

@@ -109,12 +109,14 @@ struct LumosMenuView: View {
 
                 Divider().padding(.leading, 43)
 
-                LumosActionRow(
+                LumosToggleRow(
                     icon: "leaf.fill",
                     title: "低功耗模式",
                     detail: model.powerModeText,
-                    value: "设置",
-                    action: openBatterySettings
+                    isOn: Binding(
+                        get: { model.lowPowerModeState.isEnabled },
+                        set: { model.setLowPowerMode($0) }
+                    )
                 )
             }
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
@@ -269,17 +271,6 @@ struct LumosMenuView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    private func openBatterySettings() {
-        let candidates = [
-            "x-apple.systempreferences:com.apple.Battery-Settings.extension",
-            "x-apple.systempreferences:com.apple.preference.energysaver"
-        ]
-        for address in candidates {
-            if let url = URL(string: address), NSWorkspace.shared.open(url) {
-                break
-            }
-        }
-    }
 }
 
 private struct LumosToggleRow: View {
@@ -299,29 +290,6 @@ private struct LumosToggleRow: View {
             Toggle("", isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-    }
-}
-
-private struct LumosActionRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-    let value: String
-    let action: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            rowIcon(icon)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.callout.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button(value, action: action)
                 .controlSize(.small)
         }
         .padding(.horizontal, 12)

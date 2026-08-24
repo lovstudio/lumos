@@ -14,7 +14,7 @@ Lumos 是一款面向长时间任务与 Agent 工作流的 macOS 低功耗防休
 - P0 核心闭环可行：运行中 App/PID/子进程观察、两类空闲休眠断言、Low Power Mode 与 Thermal State 读取均有公开 API 或 SDK 接口，并已在本机验证。
 - 两类 IOPM Assertion 可以独立创建和释放，且不需要管理员权限。
 - 立即熄屏可通过系统自带 `pmset displaysleepnow` 完成，本机无需管理员权限；它被隔离在适配器中，需逐 macOS 版本回归。
-- Low Power Mode 切换需要管理员权限；不进入 P0，也不在首版安装特权 Helper。
+- Low Power Mode 切换需要管理员权限；当前 switch 只修改正在使用的电源来源，并在写入后回读真实状态。
 - Apple Silicon 内置屏幕没有暴露旧 `IODisplayConnect` 控制路径；亮度控制仍是实验性能力。
 - IOPM 空闲断言不能保证合盖、电量临界、热紧急或用户主动睡眠时继续运行；实验性合盖守护
   通过管理员级 `pmset disablesleep`、真实状态回读与安全 watchdog 实现，不承诺跨版本必定可用。
@@ -46,6 +46,7 @@ npx lovstudio app lumos test
 npx lovstudio app lumos spike
 npx lovstudio app lumos probe system-state
 npx lovstudio app lumos probe clamshell-state
+npx lovstudio app lumos probe low-power-state
 ```
 
 `lovstudio app` 会根据 `packageManager` 使用 pnpm，并把上述命令转发到
@@ -61,14 +62,16 @@ npx lovstudio app lumos probe clamshell-state
 - 能力状态页明确区分直接可用、需要授权与当前不可用的功能。
 
 合盖休眠只有在 `SleepDisabled` 真实回读成功后才显示为已开启，并标记为需管理员授权的
-实验性能力；外部工具已开启时，Lumos 不会接管或在退出时关闭。低功耗模式切换仍需要
-管理员授权或特权 Helper。功耗对比在完成统一硬件与负载采样前显示“待校准”。
+实验性能力；状态不是由本次 Lumos 会话开启时，Lumos 不会接管或在退出时关闭。低功耗
+switch 需要管理员授权，且不会覆盖另一种电源来源的既有策略。功耗对比在完成统一硬件与
+负载采样前显示“待校准”。
 
 单独运行探针：
 
 ```bash
 .build/debug/lumos-spike system-state
 .build/debug/lumos-spike clamshell-state
+.build/debug/lumos-spike low-power-state
 .build/debug/lumos-spike apps
 .build/debug/lumos-spike process <pid>
 .build/debug/lumos-spike hold system 10

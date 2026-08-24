@@ -35,6 +35,7 @@ private func usage() {
         Usage:
           lumos-spike system-state
           lumos-spike clamshell-state
+          lumos-spike low-power-state
           lumos-spike apps
           lumos-spike process <pid>
           lumos-spike hold <system|display> [seconds]
@@ -65,6 +66,9 @@ private func run() throws {
 
     case "clamshell-state":
         try printJSON(ClamshellSleepController().snapshot())
+
+    case "low-power-state":
+        try printJSON(LowPowerModeController().snapshot())
 
     case "apps":
         try printJSON(ProcessProbe.runningApplications())
