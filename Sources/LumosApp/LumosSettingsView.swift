@@ -33,9 +33,9 @@ struct LumosSettingsView: View {
             .safeAreaInset(edge: .bottom) {
                 HStack(spacing: 8) {
                     Image(systemName: model.isGuardActive ? "lightbulb.fill" : "lightbulb")
-                        .foregroundStyle(model.isGuardActive ? Color.accentColor : .secondary)
+                        .foregroundStyle(model.isGuardEnabled ? Color.accentColor : .secondary)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(model.isGuardActive ? "正在守护" : "守护已暂停")
+                        Text(model.statusText)
                             .font(.caption.weight(.medium))
                         Text(model.selectedProfile.name)
                             .font(.caption2)
@@ -258,6 +258,20 @@ private struct ProfileSettingsView: View {
 
             SettingsCard(title: "组合摘要") {
                 VStack(alignment: .leading, spacing: 12) {
+                    LabeledContent("场景") {
+                        Text(model.selectedProfile.presetKind.title)
+                    }
+                    LabeledContent("触发") {
+                        Text(model.presetTriggerText)
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("退出") {
+                        Text(model.presetExitText)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
                     HStack(spacing: 8) {
                         CapabilityChip(
                             title: "任务唤醒",
@@ -344,7 +358,7 @@ private struct ApplicationSettingsView: View {
             }
 
             Label(
-                "macOS 的空闲休眠断言作用于系统级。白名单用于表达 Profile 目标、统计真实匹配进程，并为后续自动触发保留边界。",
+                "任务守护已使用白名单作为自动触发边界：首个关注应用出现时开始，最后一个退出时释放系统 lease。其他 Preset 不依赖白名单触发。",
                 systemImage: "info.circle"
             )
             .font(.caption)

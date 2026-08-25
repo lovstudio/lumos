@@ -108,7 +108,7 @@ final class LumosAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
 
     private func updateStatusItem() {
         guard let button = statusItem?.button else { return }
-        let symbolName = model.isGuardActive ? "lightbulb.fill" : "lightbulb"
+        let symbolName = model.isGuardEnabled ? "lightbulb.fill" : "lightbulb"
         let image = NSImage(
             systemSymbolName: symbolName,
             accessibilityDescription: model.statusText

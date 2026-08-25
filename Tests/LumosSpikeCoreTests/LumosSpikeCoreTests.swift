@@ -418,7 +418,13 @@ final class LumosSpikeCoreTests: XCTestCase {
         let preferences = LumosPreferences.defaults
 
         XCTAssertEqual(preferences.selectedProfileID, LumosPreferences.agentProfileID)
+        XCTAssertEqual(preferences.version, LumosPreferences.schemaVersion)
         XCTAssertEqual(preferences.selectedProfile?.name, "Agent 模式")
+        XCTAssertEqual(preferences.selectedProfile?.presetKind, .taskGuard)
+        XCTAssertEqual(
+            preferences.profiles.map(\.name),
+            ["Agent 模式", "随时可达", "保持亮屏"]
+        )
         XCTAssertTrue(preferences.activeControls.preventSystemIdleSleep)
         XCTAssertFalse(preferences.activeControls.preventDisplayIdleSleep)
         XCTAssertTrue(preferences.activeControls.preferLowPowerMode)
@@ -432,11 +438,15 @@ final class LumosSpikeCoreTests: XCTestCase {
         let custom = preferences.duplicateSelectedProfile(name: "夜间构建")
 
         XCTAssertEqual(preferences.selectedProfileID, custom.id)
-        XCTAssertEqual(preferences.profiles.count, 2)
+        XCTAssertEqual(preferences.profiles.count, 4)
+        XCTAssertEqual(custom.presetKind, .taskGuard)
 
         preferences.deleteProfile(id: custom.id)
         XCTAssertEqual(preferences.selectedProfileID, LumosPreferences.agentProfileID)
-        XCTAssertEqual(preferences.profiles.map(\.name), ["Agent 模式"])
+        XCTAssertEqual(
+            preferences.profiles.map(\.name),
+            ["Agent 模式", "随时可达", "保持亮屏"]
+        )
     }
 
     func testPreferencesStoreRoundTripsAndNormalizesWhitelist() throws {
@@ -499,8 +509,225 @@ final class LumosSpikeCoreTests: XCTestCase {
 
         let decoded = try JSONDecoder().decode(LumosProfile.self, from: Data(json.utf8))
         XCTAssertEqual(decoded.watchedApplicationIDs, [])
+        XCTAssertEqual(decoded.presetKind, .taskGuard)
         XCTAssertEqual(decoded.controls.clamshellMaximumDurationMinutes, 120)
         XCTAssertEqual(decoded.controls.clamshellBatteryFloorPercent, 20)
+    }
+
+    func testLegacyPreferencesAddNewBuiltInsAndAdvanceSchemaVersion() {
+        let agent = LumosPreferences.agentMode
+        let migrated = LumosPreferences(
+            version: 1,
+            selectedProfileID: agent.id,
+            activeControls: agent.controls,
+            profiles: [agent],
+            watchedApplications: []
+        )
+
+        XCTAssertEqual(migrated.version, 2)
+        XCTAssertEqual(
+            migrated.profiles.map(\.presetKind),
+            [.taskGuard, .alwaysReachable, .keepDisplayAwake]
+        )
+    }
+
+    func testTaskGuardRunsFromTargetTriggerThroughFinalTargetExit() throws {
+        var assertions: [FakeWakeAssertion] = []
+        let engine = WakeLeaseEngine { kind, _ in
+            let assertion = FakeWakeAssertion(kind: kind)
+            assertions.append(assertion)
+            return assertion
+        }
+        let controller = PresetSessionController(wakeLeaseEngine: engine)
+
+        let waiting = try controller.start(
+            PresetSessionContext(
+                presetKind: .taskGuard,
+                leaseKinds: [.systemIdleSleep],
+                hasConfiguredTargets: true,
+                matchedTargetCount: 0
+            ),
+            reason: "Task Guard test"
+        )
+        XCTAssertEqual(waiting.phase, .waitingForTarget)
+        XCTAssertTrue(assertions.isEmpty)
+
+        let triggered = try controller.update(
+            PresetSessionContext(
+                presetKind: .taskGuard,
+                leaseKinds: [.systemIdleSleep],
+                hasConfiguredTargets: true,
+                matchedTargetCount: 2
+            ),
+            reason: "Task Guard test"
+        )
+        XCTAssertEqual(triggered.phase, .active)
+        XCTAssertEqual(triggered.activeLeaseKinds, [.systemIdleSleep])
+        XCTAssertEqual(assertions.count, 1)
+        XCTAssertTrue(engine.isActive(.systemIdleSleep))
+
+        let oneTargetRemaining = try controller.update(
+            PresetSessionContext(
+                presetKind: .taskGuard,
+                leaseKinds: [.systemIdleSleep],
+                hasConfiguredTargets: true,
+                matchedTargetCount: 1
+            ),
+            reason: "Task Guard test"
+        )
+        XCTAssertEqual(oneTargetRemaining.phase, .active)
+        XCTAssertEqual(assertions[0].releaseCount, 0)
+
+        let completed = try controller.update(
+            PresetSessionContext(
+                presetKind: .taskGuard,
+                leaseKinds: [.systemIdleSleep],
+                hasConfiguredTargets: true,
+                matchedTargetCount: 0
+            ),
+            reason: "Task Guard test"
+        )
+        XCTAssertEqual(completed.phase, .completed)
+        XCTAssertEqual(completed.exitReason, .targetsFinished)
+        XCTAssertEqual(assertions[0].releaseCount, 1)
+        XCTAssertFalse(engine.isActive(.systemIdleSleep))
+    }
+
+    func testTaskGuardWithoutConfiguredTargetsUsesManualSession() throws {
+        let engine = WakeLeaseEngine { kind, _ in
+            FakeWakeAssertion(kind: kind)
+        }
+        let controller = PresetSessionController(wakeLeaseEngine: engine)
+
+        let active = try controller.start(
+            PresetSessionContext(
+                presetKind: .taskGuard,
+                leaseKinds: [.systemIdleSleep],
+                hasConfiguredTargets: false,
+                matchedTargetCount: 0
+            ),
+            reason: "Manual Task Guard test"
+        )
+
+        XCTAssertEqual(active.phase, .active)
+        XCTAssertTrue(engine.isActive(.systemIdleSleep))
+        _ = try controller.stop()
+        XCTAssertFalse(engine.isActive(.systemIdleSleep))
+    }
+
+    func testKeepDisplayAwakeRunsFromManualTriggerThroughManualExit() throws {
+        var assertions: [FakeWakeAssertion] = []
+        let engine = WakeLeaseEngine { kind, _ in
+            let assertion = FakeWakeAssertion(kind: kind)
+            assertions.append(assertion)
+            return assertion
+        }
+        let controller = PresetSessionController(wakeLeaseEngine: engine)
+
+        let active = try controller.start(
+            PresetSessionContext(
+                presetKind: .keepDisplayAwake,
+                leaseKinds: [.displayIdleSleep],
+                hasConfiguredTargets: false,
+                matchedTargetCount: 0
+            ),
+            reason: "Keep Display Awake test"
+        )
+        XCTAssertEqual(active.phase, .active)
+        XCTAssertEqual(active.activeLeaseKinds, [.displayIdleSleep])
+        XCTAssertTrue(engine.isActive(.displayIdleSleep))
+        XCTAssertFalse(engine.isActive(.systemIdleSleep))
+
+        let stopped = try controller.stop()
+        XCTAssertEqual(stopped.phase, .stopped)
+        XCTAssertEqual(stopped.exitReason, .userStopped)
+        XCTAssertEqual(assertions.count, 1)
+        XCTAssertEqual(assertions[0].releaseCount, 1)
+        XCTAssertFalse(engine.isActive(.displayIdleSleep))
+    }
+
+    func testAlwaysReachableIgnoresTargetExitAndReleasesOnlyWhenStopped() throws {
+        var assertion: FakeWakeAssertion?
+        let engine = WakeLeaseEngine { kind, _ in
+            let created = FakeWakeAssertion(kind: kind)
+            assertion = created
+            return created
+        }
+        let controller = PresetSessionController(wakeLeaseEngine: engine)
+
+        let active = try controller.start(
+            PresetSessionContext(
+                presetKind: .alwaysReachable,
+                leaseKinds: [.systemIdleSleep],
+                hasConfiguredTargets: true,
+                matchedTargetCount: 0
+            ),
+            reason: "Always Reachable test"
+        )
+        XCTAssertEqual(active.phase, .active)
+        XCTAssertTrue(engine.isActive(.systemIdleSleep))
+
+        let stillActive = try controller.update(
+            PresetSessionContext(
+                presetKind: .alwaysReachable,
+                leaseKinds: [.systemIdleSleep],
+                hasConfiguredTargets: true,
+                matchedTargetCount: 0
+            ),
+            reason: "Always Reachable test"
+        )
+        XCTAssertEqual(stillActive.phase, .active)
+        XCTAssertEqual(assertion?.releaseCount, 0)
+
+        let stopped = try controller.stop()
+        XCTAssertEqual(stopped.phase, .stopped)
+        XCTAssertEqual(assertion?.releaseCount, 1)
+        XCTAssertFalse(engine.isActive(.systemIdleSleep))
+    }
+
+    func testDisplayPresetSuspendsAndRecoversAcrossSafetyBoundary() throws {
+        var assertions: [FakeWakeAssertion] = []
+        let engine = WakeLeaseEngine { kind, _ in
+            let assertion = FakeWakeAssertion(kind: kind)
+            assertions.append(assertion)
+            return assertion
+        }
+        let controller = PresetSessionController(wakeLeaseEngine: engine)
+
+        _ = try controller.start(
+            PresetSessionContext(
+                presetKind: .keepDisplayAwake,
+                leaseKinds: [.displayIdleSleep],
+                hasConfiguredTargets: false,
+                matchedTargetCount: 0
+            ),
+            reason: "Display safety test"
+        )
+        let suspended = try controller.update(
+            PresetSessionContext(
+                presetKind: .keepDisplayAwake,
+                leaseKinds: [],
+                hasConfiguredTargets: false,
+                matchedTargetCount: 0,
+                safetySuspended: true
+            ),
+            reason: "Display safety test"
+        )
+        XCTAssertEqual(suspended.phase, .suspendedForSafety)
+        XCTAssertEqual(assertions[0].releaseCount, 1)
+
+        let recovered = try controller.update(
+            PresetSessionContext(
+                presetKind: .keepDisplayAwake,
+                leaseKinds: [.displayIdleSleep],
+                hasConfiguredTargets: false,
+                matchedTargetCount: 0
+            ),
+            reason: "Display safety test"
+        )
+        XCTAssertEqual(recovered.phase, .active)
+        XCTAssertEqual(assertions.count, 2)
+        XCTAssertTrue(engine.isActive(.displayIdleSleep))
     }
 
     func testClamshellStatusParserHandlesLivePmsetOutput() {

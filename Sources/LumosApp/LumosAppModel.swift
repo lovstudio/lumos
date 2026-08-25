@@ -16,6 +16,8 @@ final class LumosAppModel: ObservableObject {
     @Published private(set) var systemLeaseActive = false
     @Published private(set) var displayLeaseActive = false
     @Published private(set) var guardStartedAt: Date?
+    @Published private(set) var presetSessionPhase: PresetSessionPhase = .stopped
+    @Published private(set) var presetSessionExitReason: PresetSessionExitReason = .none
     @Published private(set) var systemState: SystemStateSnapshot
     @Published private(set) var powerSourceState: PowerSourceSnapshot
     @Published private(set) var networkPathState: NetworkPathSnapshot?
@@ -31,11 +33,10 @@ final class LumosAppModel: ObservableObject {
     private let store: LumosPreferencesStore
     private let clamshellSleepController: ClamshellSleepController
     private let lowPowerModeController: LowPowerModeController
-    private let wakeLeaseEngine: WakeLeaseEngine
+    private let presetSessionController: PresetSessionController
     private let processObservationProvider: ProcessObservationProvider
     private let safetyMonitor: SystemSafetyMonitor
     private let safetyStateMachine: SystemSafetyStateMachine
-    private var guardLease: WakeLeaseReceipt?
     private var refreshTimer: Timer?
     private var refreshTimerInterval: TimeInterval?
     private var workspaceObservationTokens: [NSObjectProtocol] = []
@@ -62,7 +63,7 @@ final class LumosAppModel: ObservableObject {
         self.store = store
         self.clamshellSleepController = clamshellSleepController
         self.lowPowerModeController = lowPowerModeController
-        self.wakeLeaseEngine = wakeLeaseEngine
+        self.presetSessionController = PresetSessionController(wakeLeaseEngine: wakeLeaseEngine)
         self.processObservationProvider = processObservationProvider
         self.safetyMonitor = safetyMonitor
         self.safetyStateMachine = safetyStateMachine
@@ -91,19 +92,42 @@ final class LumosAppModel: ObservableObject {
     }
 
     var isGuardActive: Bool {
-        guardStartedAt != nil
+        presetSessionPhase == .active
+    }
+
+    var isGuardEnabled: Bool {
+        presetSessionPhase.isEnabled
     }
 
     var statusText: String {
         if safetyDecision.severity == .critical {
             return safetyDecision.detail
         }
-        guard isGuardActive else { return "守护已暂停" }
+        switch presetSessionPhase {
+        case .waitingForTarget:
+            return "正在观察，等待关注应用开始"
+        case .suspendedForSafety:
+            return "安全保护已暂停当前能力，状态恢复后重试"
+        case .completed where presetSessionExitReason == .targetsFinished:
+            return "关注应用已全部退出，守护已自动停止"
+        case .completed where presetSessionExitReason == .safetyBoundary:
+            return "已达到安全边界，守护已停止"
+        case .stopped, .completed:
+            return "守护已暂停"
+        case .active:
+            break
+        }
         if preferences.activeControls.requestClamshellProtection,
            clamshellSleepState.isSleepDisabled {
             return clamshellSleepState.ownership == .lumos
                 ? "实验性合盖守护正在运行"
                 : "合盖守护正在运行，由外部设置提供"
+        }
+        if selectedProfile.presetKind == .alwaysReachable, systemLeaseActive {
+            return "整机保持必要唤醒，等待远程连接"
+        }
+        if selectedProfile.presetKind == .keepDisplayAwake, displayLeaseActive {
+            return "显示器正在保持唤醒"
         }
         return switch (systemLeaseActive, displayLeaseActive) {
         case (true, true): "任务与显示器正在保持唤醒"
@@ -167,6 +191,20 @@ final class LumosAppModel: ObservableObject {
         selectedProfile.watchedApplicationIDs.count
     }
 
+    var presetTriggerText: String {
+        if selectedProfile.presetKind == .taskGuard, targetApplicationCount == 0 {
+            return "未限定应用，用户开启后立即开始"
+        }
+        return selectedProfile.presetKind.triggerDescription
+    }
+
+    var presetExitText: String {
+        if selectedProfile.presetKind == .taskGuard, targetApplicationCount == 0 {
+            return "用户停止或达到安全边界"
+        }
+        return selectedProfile.presetKind.exitDescription
+    }
+
     func refreshAll() {
         lowPowerModeState = lowPowerModeController.snapshot()
         refreshCorrectionSnapshots()
@@ -222,10 +260,11 @@ final class LumosAppModel: ObservableObject {
         runningApplications = candidates.values.sorted {
             $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
         }
+        reconcilePresetSession()
     }
 
     func toggleGuard() {
-        isGuardActive ? stopGuard() : startGuard()
+        isGuardEnabled ? stopGuard() : startGuard()
     }
 
     func startGuard() {
@@ -250,36 +289,23 @@ final class LumosAppModel: ObservableObject {
             return
         }
 
-        if controls.requestClamshellProtection {
-            let transition = clamshellSleepController.activate(
-                maximumDurationMinutes: controls.clamshellMaximumDurationMinutes,
-                batteryFloorPercent: controls.clamshellBatteryFloorPercent
-            )
-            clamshellSleepState = transition.snapshot
-            switch transition.state {
-            case .cancelled, .failed:
-                lastError = transition.message
-                return
-            case .activated, .externallyManaged:
-                controls.preventSystemIdleSleep = true
-            case .deactivated:
-                break
-            }
+        if shouldCurrentPresetTrigger,
+           !activateClamshellIfNeeded(controls: &controls) {
+            statusDidChange?()
+            return
         }
 
         do {
             let effectiveControls = effectiveControlsForSafety(controls)
-            guard effectiveControls.preventSystemIdleSleep
-                    || effectiveControls.preventDisplayIdleSleep else {
-                lastError = safetyDecision.detail
-                statusDidChange?()
-                return
-            }
-            try synchronizeWakeLease(with: effectiveControls)
-            guardStartedAt = Date()
+            let snapshot = try presetSessionController.start(
+                sessionContext(controls: effectiveControls),
+                reason: sessionReason
+            )
+            applySessionSnapshot(snapshot)
             lastError = nil
         } catch {
-            releaseGuardLease()
+            _ = try? presetSessionController.stop(reason: .userStopped)
+            applySessionSnapshot(presetSessionController.snapshot)
             if preferences.activeControls.requestClamshellProtection {
                 clamshellSleepState = clamshellSleepController.deactivate().snapshot
             }
@@ -289,7 +315,16 @@ final class LumosAppModel: ObservableObject {
     }
 
     func stopGuard() {
-        releaseGuardLease()
+        stopGuard(reason: .userStopped)
+    }
+
+    private func stopGuard(reason: PresetSessionExitReason) {
+        do {
+            applySessionSnapshot(try presetSessionController.stop(reason: reason))
+        } catch {
+            applySessionSnapshot(presetSessionController.snapshot)
+            lastError = String(describing: error)
+        }
         if preferences.activeControls.requestClamshellProtection
             || clamshellSleepState.ownership == .lumos {
             let transition = clamshellSleepController.deactivate()
@@ -300,13 +335,18 @@ final class LumosAppModel: ObservableObject {
                 return
             }
         }
-        guardStartedAt = nil
         statusDidChange?()
     }
 
     func selectProfile(id: UUID) {
+        let wasEnabled = isGuardEnabled
+        if wasEnabled {
+            stopGuard()
+        }
         mutatePreferences { $0.selectProfile(id: id) }
-        synchronizeActiveGuard()
+        if wasEnabled {
+            startGuard()
+        }
     }
 
     func duplicateSelectedProfile() {
@@ -432,6 +472,7 @@ final class LumosAppModel: ObservableObject {
         updated.activeControls = updated.profiles[index].controls
         preferences = updated
         persistPreferences()
+        synchronizeActiveGuard()
     }
 
     func sleepDisplayNow() {
@@ -456,7 +497,7 @@ final class LumosAppModel: ObservableObject {
         let notificationCenter = NSWorkspace.shared.notificationCenter
         workspaceObservationTokens.forEach(notificationCenter.removeObserver)
         workspaceObservationTokens.removeAll()
-        if isGuardActive || clamshellSleepState.ownership == .lumos {
+        if isGuardEnabled || clamshellSleepState.ownership == .lumos {
             stopGuard()
         }
     }
@@ -493,13 +534,13 @@ final class LumosAppModel: ObservableObject {
         safetyDecision = transition.current
         scheduleRefreshTimer(interval: transition.current.refreshInterval)
 
-        guard isGuardActive else {
+        guard isGuardEnabled else {
             statusDidChange?()
             return
         }
 
         if transition.current.shouldReleaseSystemLease {
-            stopGuard()
+            stopGuard(reason: .safetyBoundary)
             return
         }
 
@@ -514,21 +555,7 @@ final class LumosAppModel: ObservableObject {
             }
         }
 
-        let effectiveControls = effectiveControlsForSafety(preferences.activeControls)
-        guard effectiveControls.preventSystemIdleSleep
-                || effectiveControls.preventDisplayIdleSleep else {
-            releaseGuardLease()
-            guardStartedAt = nil
-            statusDidChange?()
-            return
-        }
-
-        do {
-            try synchronizeWakeLease(with: effectiveControls)
-        } catch {
-            lastError = String(describing: error)
-        }
-        statusDidChange?()
+        reconcilePresetSession()
     }
 
     private func scheduleRefreshTimer(interval: TimeInterval) {
@@ -595,7 +622,7 @@ final class LumosAppModel: ObservableObject {
     }
 
     private func stopOwnedClamshellAfterSafetySettingChange() {
-        guard isGuardActive, clamshellSleepState.ownership == .lumos else { return }
+        guard isGuardEnabled, clamshellSleepState.ownership == .lumos else { return }
         stopGuard()
         guard clamshellSleepState.ownership != .lumos else { return }
         lastError = "合盖安全参数已改变，请重新开始守护并完成管理员授权。"
@@ -632,7 +659,7 @@ final class LumosAppModel: ObservableObject {
     }
 
     private func synchronizeActiveGuard() {
-        guard isGuardActive else {
+        guard isGuardEnabled else {
             statusDidChange?()
             return
         }
@@ -658,25 +685,10 @@ final class LumosAppModel: ObservableObject {
             lastError = "合盖模式设置已改变，请重新开始守护并完成管理员授权。"
             return
         }
-        let effectiveControls = effectiveControlsForSafety(controls)
-        guard effectiveControls.preventSystemIdleSleep
-                || effectiveControls.preventDisplayIdleSleep else {
-            releaseGuardLease()
-            guardStartedAt = nil
-            lastError = safetyDecision.detail
-            statusDidChange?()
-            return
-        }
-        do {
-            try synchronizeWakeLease(with: effectiveControls)
-            lastError = nil
-        } catch {
-            lastError = String(describing: error)
-        }
-        statusDidChange?()
+        reconcilePresetSession()
     }
 
-    private func synchronizeWakeLease(with controls: AtomicControlPreferences) throws {
+    private func sessionContext(controls: AtomicControlPreferences) -> PresetSessionContext {
         var kinds = Set<PowerAssertionKind>()
         if controls.preventSystemIdleSleep {
             kinds.insert(.systemIdleSleep)
@@ -685,44 +697,92 @@ final class LumosAppModel: ObservableObject {
             kinds.insert(.displayIdleSleep)
         }
 
-        if guardLease?.kinds == kinds {
-            refreshWakeLeaseState()
-            return
-        }
-
-        guard !kinds.isEmpty else {
-            releaseGuardLease()
-            return
-        }
-
-        let replacement = try wakeLeaseEngine.acquire(
-            kinds: kinds,
-            reason: "Lumos guard - \(selectedProfile.id.uuidString)"
+        return PresetSessionContext(
+            presetKind: selectedProfile.presetKind,
+            leaseKinds: kinds,
+            hasConfiguredTargets: targetApplicationCount > 0,
+            matchedTargetCount: matchedProcessCount,
+            safetySuspended: kinds.isEmpty
         )
-        let previous = guardLease
-        guardLease = replacement
-        do {
-            try previous?.release()
-        } catch {
-            refreshWakeLeaseState()
-            throw error
-        }
-        refreshWakeLeaseState()
     }
 
-    private func releaseGuardLease() {
+    private var sessionReason: String {
+        "Lumos preset \(selectedProfile.presetKind.rawValue) - \(selectedProfile.id.uuidString)"
+    }
+
+    private var shouldCurrentPresetTrigger: Bool {
+        selectedProfile.presetKind != .taskGuard
+            || targetApplicationCount == 0
+            || matchedProcessCount > 0
+    }
+
+    private func activateClamshellIfNeeded(
+        controls: inout AtomicControlPreferences
+    ) -> Bool {
+        guard controls.requestClamshellProtection,
+              !clamshellSleepState.isSleepDisabled else {
+            if controls.requestClamshellProtection {
+                controls.preventSystemIdleSleep = true
+            }
+            return true
+        }
+
+        let transition = clamshellSleepController.activate(
+            maximumDurationMinutes: controls.clamshellMaximumDurationMinutes,
+            batteryFloorPercent: controls.clamshellBatteryFloorPercent
+        )
+        clamshellSleepState = transition.snapshot
+        switch transition.state {
+        case .cancelled, .failed:
+            lastError = transition.message
+            return false
+        case .activated, .externallyManaged:
+            controls.preventSystemIdleSleep = true
+            return true
+        case .deactivated:
+            return true
+        }
+    }
+
+    private func reconcilePresetSession() {
+        guard isGuardEnabled else { return }
+        var controls = preferences.activeControls
+        if shouldCurrentPresetTrigger,
+           !activateClamshellIfNeeded(controls: &controls) {
+            statusDidChange?()
+            return
+        }
+
         do {
-            try guardLease?.release()
+            let snapshot = try presetSessionController.update(
+                sessionContext(controls: effectiveControlsForSafety(controls)),
+                reason: sessionReason
+            )
+            applySessionSnapshot(snapshot)
+            if snapshot.phase == .completed,
+               clamshellSleepState.ownership == .lumos {
+                clamshellSleepState = clamshellSleepController.deactivate().snapshot
+            }
             lastError = nil
         } catch {
             lastError = String(describing: error)
         }
-        guardLease = nil
-        refreshWakeLeaseState()
+        statusDidChange?()
     }
 
-    private func refreshWakeLeaseState() {
-        systemLeaseActive = wakeLeaseEngine.isActive(.systemIdleSleep)
-        displayLeaseActive = wakeLeaseEngine.isActive(.displayIdleSleep)
+    private func applySessionSnapshot(_ snapshot: PresetSessionSnapshot) {
+        let wasActive = presetSessionPhase == .active
+        presetSessionPhase = snapshot.phase
+        presetSessionExitReason = snapshot.exitReason
+        systemLeaseActive = snapshot.activeLeaseKinds.contains(.systemIdleSleep)
+        displayLeaseActive = snapshot.activeLeaseKinds.contains(.displayIdleSleep)
+
+        if snapshot.phase == .active, !wasActive {
+            guardStartedAt = Date()
+        } else if snapshot.phase == .stopped
+                    || snapshot.phase == .waitingForTarget
+                    || snapshot.phase == .completed {
+            guardStartedAt = nil
+        }
     }
 }

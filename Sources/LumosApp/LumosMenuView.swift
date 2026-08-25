@@ -42,10 +42,10 @@ struct LumosMenuView: View {
         HStack(spacing: 13) {
             ZStack {
                 Circle()
-                    .fill(model.isGuardActive ? Color.accentColor : Color.secondary.opacity(0.12))
+                    .fill(model.isGuardEnabled ? Color.accentColor : Color.secondary.opacity(0.12))
                 Image(systemName: model.isGuardActive ? "lightbulb.fill" : "lightbulb")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(model.isGuardActive ? .white : .secondary)
+                    .foregroundStyle(model.isGuardEnabled ? .white : .secondary)
             }
             .frame(width: 42, height: 42)
 
@@ -65,12 +65,12 @@ struct LumosMenuView: View {
 
             Spacer()
 
-            Button(model.isGuardActive ? "停止" : "开始") {
+            Button(guardButtonTitle) {
                 model.toggleGuard()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .tint(model.isGuardActive ? .red : .accentColor)
+            .tint(model.isGuardEnabled ? .red : .accentColor)
         }
     }
 
@@ -256,18 +256,29 @@ struct LumosMenuView: View {
     }
 
     private var profileTargetSummary: String {
-        if model.targetApplicationCount == 0 {
-            return "\(model.selectedProfile.name) · 未限定应用"
+        guard model.selectedProfile.presetKind == .taskGuard else {
+            return "\(model.selectedProfile.presetKind.title) · \(model.presetTriggerText)"
         }
-        return "\(model.selectedProfile.name) · \(model.targetApplicationCount) 个应用"
+        if model.targetApplicationCount == 0 {
+            return "任务守护 · \(model.presetTriggerText)"
+        }
+        return "\(model.selectedProfile.presetKind.title) · \(model.targetApplicationCount) 个关注应用"
+    }
+
+    private var guardButtonTitle: String {
+        switch model.presetSessionPhase {
+        case .waitingForTarget: "取消"
+        case .active, .suspendedForSafety: "停止"
+        case .stopped, .completed: "开始"
+        }
     }
 
     private var statusColor: Color {
         switch model.safetyDecision.severity {
         case .critical: .red
         case .degraded: .orange
-        case .efficient: model.isGuardActive ? .yellow : .secondary.opacity(0.5)
-        case .normal: model.isGuardActive ? .green : .secondary.opacity(0.5)
+        case .efficient: model.isGuardEnabled ? .yellow : .secondary.opacity(0.5)
+        case .normal: model.isGuardActive ? .green : (model.isGuardEnabled ? .yellow : .secondary.opacity(0.5))
         }
     }
 

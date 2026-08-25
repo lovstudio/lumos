@@ -4,7 +4,7 @@
 
 Lumos 是一款面向长时间任务与 Agent 工作流的 macOS 低功耗防休眠菜单栏工具。
 
-当前项目已完成首轮技术可行性 Spike、D1 原生菜单栏骨架，以及第一版 Apple 风格
+当前项目已完成首轮技术可行性 Spike、D1-D5 原生守护闭环，以及第一版 Apple 风格
 主面板与设置中心。产品定义以
 [HANDOFF.md](HANDOFF.md) 和 [Lumos PRD v0.2](docs/Lumos-PRD-v0.2.md)
 为准；实验性能力仍不会包装成稳定产品承诺。
@@ -16,6 +16,7 @@ Lumos 是一款面向长时间任务与 Agent 工作流的 macOS 低功耗防休
 - `WakeLeaseEngine` 是进程内唯一 assertion 所有者；多个 receipt 按控制类型共享引用，最后一张归还后才释放系统断言。
 - `ProcessObservationProvider` 以 PID + 启动时间区分进程实例，首帧只建立基线，后续输出启动、退出与 PID 复用事件；App 启停同时触发 `NSWorkspace` 即时刷新，并由低频快照校正。
 - `SystemSafetyMonitor` 用 ProcessInfo 通知、IOPowerSources 与常驻 NWPathMonitor 监听低功耗、温度、电池/电源和网络变化；状态机按风险动态降低采样频率或撤销高风险 lease。
+- 三个 P0 Preset 已接入真实 lease 生命周期：Agent 模式对应任务守护，有白名单时按首个 App 出现/最后一个 App 退出自动启停；保持亮屏只持有 display lease；随时可达不依赖进程，只持有必要的 system lease。
 - 立即熄屏可通过系统自带 `pmset displaysleepnow` 完成，本机无需管理员权限；它被隔离在适配器中，需逐 macOS 版本回归。
 - Low Power Mode 切换需要管理员权限；当前 switch 只修改正在使用的电源来源，并在写入后回读真实状态。
 - Apple Silicon 内置屏幕没有暴露旧 `IODisplayConnect` 控制路径；亮度控制仍是实验性能力。
@@ -61,9 +62,9 @@ npx lovstudio app lumos probe low-power-state
 
 当前开发界面包括：
 
-- 主面板的防止自动锁屏、合盖能力状态、低功耗模式真实状态与 Agent Profile；
+- 主面板的防止自动锁屏、合盖能力状态、低功耗模式真实状态，以及任务守护、随时可达、保持亮屏三个内置 Preset；
 - 可持久化的原子控制、自定义 Profile，以及按 Profile 保存的运行中 App 白名单；白名单实例数来自稳定进程身份，权限不足时明确显示身份不可读取；
-- 本次守护时长、真实匹配进程数，以及实时电源、温度、网络与安全降级状态；
+- Preset 的触发与退出条件、本次守护时长、真实匹配进程数，以及实时电源、温度、网络与安全降级状态；
 - 能力状态页明确区分直接可用、需要授权与当前不可用的功能。
 
 合盖休眠只有在 `SleepDisabled` 真实回读成功后才显示为已开启，并标记为需管理员授权的

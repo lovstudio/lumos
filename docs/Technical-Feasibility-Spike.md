@@ -206,6 +206,18 @@ protocol AtomicControlDriver: Sendable {
 
 `WakeLeaseEngine` 是唯一能创建/释放 control receipt 的所有者。UI、Provider 和持久化层都不能直接调用 IOKit，从结构上避免“显示开着但引擎不知道”的孤儿状态。
 
+### 5.1 D5 Preset 会话闭环
+
+`PresetSessionController` 位于 UI 与 `WakeLeaseEngine` 之间，统一维护
+`stopped → waiting/active → completed` 会话状态，并把安全降级表达为可恢复的
+`suspendedForSafety`：
+
+- **Agent 模式 / 任务守护：** 配置白名单后，首个匹配 App 出现才申请 system lease；只要仍有一个匹配实例就继续持有，最后一个退出后自动释放。未限定应用时保留用户手动开始/停止的基础守护行为。
+- **保持亮屏：** 用户开始后只申请 display lease，不额外申请 system lease；用户停止或安全策略撤销时释放。
+- **随时可达：** 用户开始后申请 system lease，不依赖匹配进程；网络不可达只降级解释，不释放本地 lease，用户停止或系统安全边界才退出。
+
+Profile schema 已升级到 v2；旧 Profile 缺少 `presetKind` 时按任务守护迁移，并自动补齐另外两个内置 Preset。端到端测试使用同一控制器和 `WakeLeaseEngine`，覆盖等待触发、多目标存续、最终退出、手动退出及安全暂停后恢复。
+
 ## 6. 状态恢复策略
 
 P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢复的对象不是旧 assertion ID，而是用户意图：
@@ -223,9 +235,9 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 ## 7. 两周 MVP 计划
 
 执行进度：D1 的 `NSStatusItem + SwiftUI` 开发骨架已于 2026-08-24 落地；D2 的
-`WakeLeaseEngine`、D3 的 Workspace/PID/子进程观察层，以及 D4 的事件驱动系统安全状态机
-均已于 2026-08-25 落地。可通过 `npx lovstudio app lumos dev` 启动；签名 `.app`、
-任务状态模型和后续 D5-D10 仍按下表推进。
+`WakeLeaseEngine`、D3 的 Workspace/PID/子进程观察层、D4 的事件驱动系统安全状态机，
+以及 D5 的三个 P0 Preset 会话闭环均已于 2026-08-25 落地。可通过
+`npx lovstudio app lumos dev` 启动；签名 `.app` 与后续 D6-D10 仍按下表推进。
 
 ### 第 1 周：建立可信的守护闭环
 
@@ -235,7 +247,7 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 | D2 | `WakeLeaseEngine`、引用计数、IOPM driver | 已完成：共享 assertion、最终引用释放、失败回滚、析构与真实 IOKit 生命周期测试 |
 | D3 | Workspace/PID/子进程 provider | 已完成：App 生命周期刷新、真实进程启动/退出、命令树、PID 复用与不可观察语义测试 |
 | D4 | ProcessInfo、IOPowerSources、NWPath safety monitors | 已完成：Low Power/Thermal 通知、电源/电池/网络回读和安全动作状态机测试 |
-| D5 | 任务守护/保持亮屏/随时可达三个 Preset | 从 trigger 到 lease 到 exit 的端到端测试 |
+| D5 | 任务守护/保持亮屏/随时可达三个 Preset | 已完成：三个场景从 trigger 到 lease 到 exit，并覆盖 display 安全暂停/恢复 |
 
 ### 第 2 周：解释、恢复与可分发性
 

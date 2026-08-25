@@ -83,6 +83,7 @@ public struct LumosProfile: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public var name: String
     public var summary: String
+    public var presetKind: LumosPresetKind
     public var controls: AtomicControlPreferences
     public var watchedApplicationIDs: [String]
     public let isBuiltIn: Bool
@@ -91,6 +92,7 @@ public struct LumosProfile: Codable, Equatable, Identifiable, Sendable {
         id: UUID = UUID(),
         name: String,
         summary: String,
+        presetKind: LumosPresetKind = .taskGuard,
         controls: AtomicControlPreferences,
         watchedApplicationIDs: [String] = [],
         isBuiltIn: Bool = false
@@ -98,6 +100,7 @@ public struct LumosProfile: Codable, Equatable, Identifiable, Sendable {
         self.id = id
         self.name = name
         self.summary = summary
+        self.presetKind = presetKind
         self.controls = controls
         self.watchedApplicationIDs = watchedApplicationIDs
         self.isBuiltIn = isBuiltIn
@@ -107,6 +110,7 @@ public struct LumosProfile: Codable, Equatable, Identifiable, Sendable {
         case id
         case name
         case summary
+        case presetKind
         case controls
         case watchedApplicationIDs
         case isBuiltIn
@@ -117,6 +121,10 @@ public struct LumosProfile: Codable, Equatable, Identifiable, Sendable {
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         summary = try container.decode(String.self, forKey: .summary)
+        presetKind = try container.decodeIfPresent(
+            LumosPresetKind.self,
+            forKey: .presetKind
+        ) ?? .taskGuard
         controls = try container.decode(AtomicControlPreferences.self, forKey: .controls)
         watchedApplicationIDs = try container.decodeIfPresent(
             [String].self,
@@ -130,6 +138,7 @@ public struct LumosProfile: Codable, Equatable, Identifiable, Sendable {
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try container.encode(summary, forKey: .summary)
+        try container.encode(presetKind, forKey: .presetKind)
         try container.encode(controls, forKey: .controls)
         try container.encode(watchedApplicationIDs, forKey: .watchedApplicationIDs)
         try container.encode(isBuiltIn, forKey: .isBuiltIn)
@@ -137,8 +146,10 @@ public struct LumosProfile: Codable, Equatable, Identifiable, Sendable {
 }
 
 public struct LumosPreferences: Codable, Equatable, Sendable {
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
     public static let agentProfileID = UUID(uuidString: "A63E0001-4C7D-4AD7-9000-000000000001")!
+    public static let alwaysReachableProfileID = UUID(uuidString: "A63E0001-4C7D-4AD7-9000-000000000002")!
+    public static let keepDisplayAwakeProfileID = UUID(uuidString: "A63E0001-4C7D-4AD7-9000-000000000003")!
 
     public var version: Int
     public var selectedProfileID: UUID
@@ -165,7 +176,8 @@ public struct LumosPreferences: Codable, Equatable, Sendable {
         LumosProfile(
             id: agentProfileID,
             name: "Agent 模式",
-            summary: "允许熄屏，保持任务运行，并建议使用低功耗模式。",
+            summary: "任务守护：关注应用出现后保持任务运行，全部退出后自动停止。",
+            presetKind: .taskGuard,
             controls: AtomicControlPreferences(
                 preventDisplayIdleSleep: false,
                 preventSystemIdleSleep: true,
@@ -176,12 +188,48 @@ public struct LumosPreferences: Codable, Equatable, Sendable {
         )
     }
 
+    public static var alwaysReachable: LumosProfile {
+        LumosProfile(
+            id: alwaysReachableProfileID,
+            name: "随时可达",
+            summary: "立即保持整机必要唤醒；网络异常只降级说明，不误停本地守护。",
+            presetKind: .alwaysReachable,
+            controls: AtomicControlPreferences(
+                preventDisplayIdleSleep: false,
+                preventSystemIdleSleep: true,
+                requestClamshellProtection: false,
+                preferLowPowerMode: true
+            ),
+            isBuiltIn: true
+        )
+    }
+
+    public static var keepDisplayAwake: LumosProfile {
+        LumosProfile(
+            id: keepDisplayAwakeProfileID,
+            name: "保持亮屏",
+            summary: "立即防止显示器因空闲熄灭，停止后恢复系统原有节奏。",
+            presetKind: .keepDisplayAwake,
+            controls: AtomicControlPreferences(
+                preventDisplayIdleSleep: true,
+                preventSystemIdleSleep: false,
+                requestClamshellProtection: false,
+                preferLowPowerMode: false
+            ),
+            isBuiltIn: true
+        )
+    }
+
+    public static var builtInProfiles: [LumosProfile] {
+        [agentMode, alwaysReachable, keepDisplayAwake]
+    }
+
     public static var defaults: LumosPreferences {
         let agent = agentMode
         return LumosPreferences(
             selectedProfileID: agent.id,
             activeControls: agent.controls,
-            profiles: [agent],
+            profiles: builtInProfiles,
             watchedApplications: []
         )
     }
@@ -202,6 +250,7 @@ public struct LumosPreferences: Codable, Equatable, Sendable {
         let profile = LumosProfile(
             name: name,
             summary: "基于“\(source.name)”创建的自定义方案。",
+            presetKind: source.presetKind,
             controls: source.controls,
             watchedApplicationIDs: source.watchedApplicationIDs
         )
@@ -223,8 +272,10 @@ public struct LumosPreferences: Codable, Equatable, Sendable {
     }
 
     public mutating func normalize() {
-        if !profiles.contains(where: { $0.id == Self.agentProfileID }) {
-            profiles.insert(Self.agentMode, at: 0)
+        version = Self.schemaVersion
+        for (index, profile) in Self.builtInProfiles.enumerated()
+        where !profiles.contains(where: { $0.id == profile.id }) {
+            profiles.insert(profile, at: min(index, profiles.count))
         }
         if !profiles.contains(where: { $0.id == selectedProfileID }) {
             selectedProfileID = Self.agentProfileID
