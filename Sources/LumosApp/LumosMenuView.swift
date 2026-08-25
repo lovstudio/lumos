@@ -149,7 +149,7 @@ struct LumosMenuView: View {
                     }
                 }
 
-                LumosPresetSegmentedPicker(model: model)
+                LumosProfileSelector(model: model, size: .compact)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
