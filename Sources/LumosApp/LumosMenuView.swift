@@ -148,17 +148,7 @@ struct LumosMenuView: View {
 
                 Spacer()
 
-                Picker("", selection: Binding(
-                    get: { model.preferences.selectedProfileID },
-                    set: { model.selectProfile(id: $0) }
-                )) {
-                    ForEach(model.preferences.profiles) { profile in
-                        Text(profile.name).tag(profile.id)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(maxWidth: 150)
+                LumosProfileMenu(model: model, size: .compact)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)

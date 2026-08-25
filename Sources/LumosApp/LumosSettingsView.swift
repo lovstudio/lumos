@@ -203,16 +203,7 @@ private struct ProfileSettingsView: View {
                         .foregroundStyle(Color.accentColor)
                         .frame(width: 28)
 
-                    Picker("Profile", selection: Binding(
-                        get: { model.preferences.selectedProfileID },
-                        set: { model.selectProfile(id: $0) }
-                    )) {
-                        ForEach(model.preferences.profiles) { profile in
-                            Text(profile.name).tag(profile.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: 270)
+                    LumosProfileMenu(model: model, size: .regular)
 
                     Spacer()
 
