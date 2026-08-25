@@ -71,7 +71,8 @@ public enum ClamshellSleepOutputParser {
 }
 
 /// Controls the system-wide `pmset disablesleep` override used for experimental
-/// closed-display sessions. It never clears a setting it did not enable.
+/// closed-display sessions. External state is left untouched unless the user
+/// explicitly approves taking control or restoring the macOS default.
 ///
 /// Activation starts a short-lived root watchdog. The watchdog restores normal
 /// sleep if Lumos exits, the session reaches its deadline, the battery reaches
@@ -93,6 +94,7 @@ public final class ClamshellSleepController {
     private let processIdentifier: Int32
     private let statusReader: StatusReader
     private let privilegedExecutor: PrivilegedExecutor
+    private let usesSharedPrivilegedRuntime: Bool
     private let clock: Clock
     private let sleeper: Sleeper
     private let fileManager: FileManager
@@ -103,6 +105,7 @@ public final class ClamshellSleepController {
             processIdentifier: getpid(),
             statusReader: Self.readSystemStatus,
             privilegedExecutor: PrivilegedCommandExecutor.execute,
+            usesSharedPrivilegedRuntime: true,
             clock: Date.init,
             sleeper: Thread.sleep(forTimeInterval:),
             fileManager: .default
@@ -114,6 +117,7 @@ public final class ClamshellSleepController {
         processIdentifier: Int32,
         statusReader: @escaping StatusReader,
         privilegedExecutor: @escaping PrivilegedExecutor,
+        usesSharedPrivilegedRuntime: Bool = false,
         clock: @escaping Clock = Date.init,
         sleeper: @escaping Sleeper = Thread.sleep(forTimeInterval:),
         fileManager: FileManager = .default
@@ -122,6 +126,7 @@ public final class ClamshellSleepController {
         self.processIdentifier = processIdentifier
         self.statusReader = statusReader
         self.privilegedExecutor = privilegedExecutor
+        self.usesSharedPrivilegedRuntime = usesSharedPrivilegedRuntime
         self.clock = clock
         self.sleeper = sleeper
         self.fileManager = fileManager
@@ -142,7 +147,7 @@ public final class ClamshellSleepController {
 
             let detail = switch ownership {
             case .lumos: "合盖休眠已由 Lumos 暂时关闭。"
-            case .external: "系统睡眠已关闭，但不是由本次 Lumos 会话开启。"
+            case .external: "当前系统级合盖休眠状态不由 Lumos 管理。"
             case .none: "合盖时仍会按 macOS 默认策略休眠。"
             }
             return ClamshellSleepSnapshot(
@@ -173,7 +178,8 @@ public final class ClamshellSleepController {
 
     public func activate(
         maximumDurationMinutes: Int,
-        batteryFloorPercent: Int
+        batteryFloorPercent: Int,
+        takeOverExisting: Bool = true
     ) -> ClamshellSleepTransition {
         let before = snapshot()
         guard before.isAvailable else {
@@ -183,13 +189,17 @@ public final class ClamshellSleepController {
                 message: before.detail
             )
         }
-        if before.isSleepDisabled {
+        if before.isSleepDisabled, before.ownership == .lumos {
             return ClamshellSleepTransition(
-                state: before.ownership == .lumos ? .activated : .externallyManaged,
+                state: .activated,
+                snapshot: before
+            )
+        }
+        if before.isSleepDisabled, !takeOverExisting {
+            return ClamshellSleepTransition(
+                state: .externallyManaged,
                 snapshot: before,
-                message: before.ownership == .external
-                    ? "系统睡眠已经关闭，但不是由本次 Lumos 会话开启；Lumos 不会接管或在退出时关闭它。"
-                    : nil
+                message: "当前合盖休眠状态不由 Lumos 管理。请先选择由 Lumos 接管，或恢复系统默认。"
             )
         }
 
@@ -219,7 +229,16 @@ public final class ClamshellSleepController {
         }
 
         let command = privilegedActivationCommand(for: marker)
-        switch privilegedExecutor(command) {
+        let activationResult = usesSharedPrivilegedRuntime
+            ? PrivilegedPowerRuntime.shared.activateClamshellProtection(
+                ownerPID: marker.ownerPID,
+                markerPath: markerURL.path,
+                deadline: marker.deadline,
+                batteryFloorPercent: marker.batteryFloorPercent,
+                legacyCommand: command
+            )
+            : privilegedExecutor(command)
+        switch activationResult {
         case .cancelled:
             try? fileManager.removeItem(at: markerURL)
             return ClamshellSleepTransition(
@@ -250,6 +269,56 @@ public final class ClamshellSleepController {
         return ClamshellSleepTransition(state: .activated, snapshot: after)
     }
 
+    /// Explicitly clears a system-wide override even when Lumos did not create
+    /// it. The read-back detects tools that immediately write the value again.
+    public func restoreSystemDefault() -> ClamshellSleepTransition {
+        let before = snapshot()
+        guard before.isAvailable else {
+            return ClamshellSleepTransition(
+                state: .failed,
+                snapshot: before,
+                message: before.detail
+            )
+        }
+        if before.ownership == .lumos {
+            return deactivate()
+        }
+        guard before.isSleepDisabled else {
+            return ClamshellSleepTransition(state: .deactivated, snapshot: before)
+        }
+
+        let command = "/usr/bin/pmset -a disablesleep 0"
+        let restoreResult = usesSharedPrivilegedRuntime
+            ? PrivilegedPowerRuntime.shared.restoreClamshellSleep(legacyCommand: command)
+            : privilegedExecutor(command)
+        switch restoreResult {
+        case .cancelled:
+            return ClamshellSleepTransition(
+                state: .cancelled,
+                snapshot: snapshot(),
+                message: "已取消管理员授权，系统合盖休眠状态没有改变。"
+            )
+        case .failed(let message):
+            return ClamshellSleepTransition(
+                state: .failed,
+                snapshot: snapshot(),
+                message: message
+            )
+        case .succeeded:
+            break
+        }
+
+        let after = waitForExpectedState(false, timeout: 4)
+        guard !after.isSleepDisabled else {
+            return ClamshellSleepTransition(
+                state: .failed,
+                snapshot: after,
+                message: "系统状态仍为开启，可能有相关软件持续控制。请先关闭其他防休眠、合盖控制或电源管理软件，然后重新检查。"
+            )
+        }
+        return ClamshellSleepTransition(state: .deactivated, snapshot: after)
+    }
+
     public func deactivate() -> ClamshellSleepTransition {
         let before = snapshot()
         guard before.ownership == .lumos else {
@@ -268,7 +337,7 @@ public final class ClamshellSleepController {
             return ClamshellSleepTransition(
                 state: .failed,
                 snapshot: before,
-                message: "无法通知安全 watchdog 恢复系统休眠：\(error)"
+                message: "无法通知安全保护进程恢复系统休眠：\(error)"
             )
         }
 
@@ -277,7 +346,7 @@ public final class ClamshellSleepController {
             return ClamshellSleepTransition(
                 state: .failed,
                 snapshot: after,
-                message: "安全 watchdog 尚未恢复系统休眠。可运行 sudo pmset -a disablesleep 0 手动恢复。"
+                message: "安全保护进程尚未恢复系统休眠。可运行 sudo pmset -a disablesleep 0 手动恢复。"
             )
         }
         return ClamshellSleepTransition(state: .deactivated, snapshot: after)

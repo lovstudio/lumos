@@ -217,7 +217,7 @@ public enum SystemSafetyPolicy {
             return "电量已到安全线，已撤销亮屏与合盖保护"
         }
         if conditions.contains(.batteryLevelUnknown) {
-            return "电池电量不可读取，已停止实验性合盖保护"
+            return "电池电量不可读取，已停止合盖运行"
         }
         if conditions.contains(.thermalUnknown) {
             return "温度状态不可读取，未启用高风险保护"

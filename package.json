@@ -1,6 +1,7 @@
 {
   "name": "lumos",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "buildNumber": 1,
   "private": true,
   "description": "A low-power macOS wake lease for unfinished work.",
   "license": "UNLICENSED",
@@ -12,9 +13,10 @@
   ],
   "packageManager": "pnpm@10.33.3",
   "scripts": {
-    "dev": "swift run lumos-app",
+    "dev": "node Scripts/dev.mjs",
     "build": "swift build",
-    "build:release": "swift build -c release",
+    "build:release": "node Scripts/build-release.mjs",
+    "build:release:notarized": "node Scripts/build-release.mjs --notarize",
     "test": "swift test",
     "spike": "./Scripts/run-spike.sh",
     "probe": "swift run lumos-spike",

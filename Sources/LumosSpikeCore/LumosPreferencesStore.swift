@@ -13,7 +13,9 @@ public struct LumosPreferencesStore {
         suiteName: String = defaultSuiteName,
         key: String = defaultKey
     ) {
-        self.defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        self.defaults = Bundle.main.bundleIdentifier == suiteName
+            ? .standard
+            : (UserDefaults(suiteName: suiteName) ?? .standard)
         self.key = key
     }
 
@@ -29,6 +31,9 @@ public struct LumosPreferencesStore {
             return .defaults
         }
         preferences.normalize()
+        if let migratedData = try? encoder.encode(preferences), migratedData != data {
+            defaults.set(migratedData, forKey: key)
+        }
         return preferences
     }
 

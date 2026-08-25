@@ -1,0 +1,31 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="166" y1="92" x2="845" y2="932" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#14233A"/>
+      <stop offset="1" stop-color="#07101E"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 445) rotate(90) scale(330)">
+      <stop stop-color="#FFE2A3" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#F6B94E" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lamp" x1="405" y1="290" x2="620" y2="690" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF2C8"/>
+      <stop offset="0.55" stop-color="#F8C766"/>
+      <stop offset="1" stop-color="#E8992F"/>
+    </linearGradient>
+    <filter id="shadow" x="252" y="196" width="520" height="624" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="28" stdDeviation="26" flood-color="#000814" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+  <rect x="40" y="40" width="944" height="944" rx="222" fill="url(#bg)"/>
+  <rect x="43" y="43" width="938" height="938" rx="219" stroke="#DCE7F6" stroke-opacity="0.12" stroke-width="6"/>
+  <circle cx="512" cy="445" r="330" fill="url(#glow)"/>
+  <circle cx="512" cy="445" r="285" stroke="#FFD982" stroke-opacity="0.16" stroke-width="24"/>
+  <circle cx="512" cy="445" r="226" stroke="#FFD982" stroke-opacity="0.25" stroke-width="18"/>
+  <g filter="url(#shadow)">
+    <path d="M512 230C387.2 230 286 331.2 286 456C286 542.8 335 618.2 407 656V708C407 733.4 427.6 754 453 754H571C596.4 754 617 733.4 617 708V656C689 618.2 738 542.8 738 456C738 331.2 636.8 230 512 230Z" fill="#102139" stroke="url(#lamp)" stroke-width="34"/>
+    <path d="M427 660H597V710C597 724.4 585.4 736 571 736H453C438.6 736 427 724.4 427 710V660Z" fill="url(#lamp)"/>
+    <path d="M458 779H566" stroke="#F4BB54" stroke-width="28" stroke-linecap="round"/>
+    <path d="M512 346C469.5 346 435 380.5 435 423C435 455.7 455.4 483.6 484.2 494.7L492 566H532L539.8 494.7C568.6 483.6 589 455.7 589 423C589 380.5 554.5 346 512 346Z" fill="url(#lamp)"/>
+  </g>
+</svg>

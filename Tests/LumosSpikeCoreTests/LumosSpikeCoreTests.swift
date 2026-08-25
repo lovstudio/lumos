@@ -414,39 +414,16 @@ final class LumosSpikeCoreTests: XCTestCase {
         XCTAssertTrue(DisplaySleepProbe.isAvailable)
     }
 
-    func testDefaultPreferencesUseAgentModeWithoutDisplayLease() {
+    func testDefaultPreferencesUseDirectGuardControlsWithoutDisplayLease() {
         let preferences = LumosPreferences.defaults
 
-        XCTAssertEqual(preferences.selectedProfileID, LumosPreferences.agentProfileID)
         XCTAssertEqual(preferences.version, LumosPreferences.schemaVersion)
-        XCTAssertEqual(preferences.selectedProfile?.name, "Agent 模式")
-        XCTAssertEqual(preferences.selectedProfile?.presetKind, .taskGuard)
-        XCTAssertEqual(
-            preferences.profiles.map(\.name),
-            ["Agent 模式", "随时可达", "保持亮屏"]
-        )
         XCTAssertTrue(preferences.activeControls.preventSystemIdleSleep)
         XCTAssertFalse(preferences.activeControls.preventDisplayIdleSleep)
         XCTAssertTrue(preferences.activeControls.preferLowPowerMode)
         XCTAssertFalse(preferences.activeControls.requestClamshellProtection)
         XCTAssertEqual(preferences.activeControls.clamshellMaximumDurationMinutes, 120)
         XCTAssertEqual(preferences.activeControls.clamshellBatteryFloorPercent, 20)
-    }
-
-    func testCustomProfileCanBeCreatedSelectedAndDeleted() {
-        var preferences = LumosPreferences.defaults
-        let custom = preferences.duplicateSelectedProfile(name: "夜间构建")
-
-        XCTAssertEqual(preferences.selectedProfileID, custom.id)
-        XCTAssertEqual(preferences.profiles.count, 4)
-        XCTAssertEqual(custom.presetKind, .taskGuard)
-
-        preferences.deleteProfile(id: custom.id)
-        XCTAssertEqual(preferences.selectedProfileID, LumosPreferences.agentProfileID)
-        XCTAssertEqual(
-            preferences.profiles.map(\.name),
-            ["Agent 模式", "随时可达", "保持亮屏"]
-        )
     }
 
     func testPreferencesStoreRoundTripsAndNormalizesWhitelist() throws {
@@ -467,68 +444,93 @@ final class LumosSpikeCoreTests: XCTestCase {
         XCTAssertEqual(store.load().watchedApplications.count, 1)
     }
 
-    func testProfileApplicationTargetsAreDeduplicatedAndBoundToKnownApplications() {
-        let application = WatchedApplication(
-            id: "com.example.agent",
-            displayName: "Agent",
-            executablePath: nil
-        )
-        let profile = LumosProfile(
-            name: "Targeted",
-            summary: "Test",
-            controls: LumosPreferences.agentMode.controls,
-            watchedApplicationIDs: [application.id, application.id, "com.example.unknown"]
-        )
-
-        let preferences = LumosPreferences(
-            selectedProfileID: profile.id,
-            activeControls: profile.controls,
-            profiles: [profile],
-            watchedApplications: [application]
-        )
-
-        XCTAssertEqual(preferences.selectedProfile?.watchedApplicationIDs, [application.id])
-    }
-
-    func testLegacyProfileWithoutApplicationTargetsStillDecodes() throws {
-        let profile = LumosPreferences.agentMode
+    func testLegacyProfilePreferencesMigrateSelectedControlsAndApplications() throws {
+        let selectedProfileID = UUID()
+        let otherProfileID = UUID()
         let json = """
         {
-          "id": "\(profile.id.uuidString)",
-          "name": "Agent 模式",
-          "summary": "Legacy",
-          "controls": {
+          "version": 4,
+          "selectedProfileID": "\(selectedProfileID.uuidString)",
+          "activeControls": {
+            "preventDisplayIdleSleep": true,
+            "preventSystemIdleSleep": false,
+            "requestClamshellProtection": false,
+            "preferLowPowerMode": false
+          },
+          "profiles": [
+            {
+              "id": "\(selectedProfileID.uuidString)",
+              "watchedApplicationIDs": ["com.example.selected"]
+            },
+            {
+              "id": "\(otherProfileID.uuidString)",
+              "watchedApplicationIDs": ["com.example.other"]
+            }
+          ],
+          "watchedApplications": [
+            {
+              "id": "com.example.selected",
+              "displayName": "Selected",
+              "executablePath": null
+            },
+            {
+              "id": "com.example.other",
+              "displayName": "Other",
+              "executablePath": null
+            }
+          ]
+        }
+        """
+
+        let migrated = try JSONDecoder().decode(LumosPreferences.self, from: Data(json.utf8))
+
+        XCTAssertEqual(migrated.version, LumosPreferences.schemaVersion)
+        XCTAssertTrue(migrated.activeControls.preventDisplayIdleSleep)
+        XCTAssertFalse(migrated.activeControls.preventSystemIdleSleep)
+        XCTAssertEqual(migrated.watchedApplications.map(\.id), ["com.example.selected"])
+        XCTAssertEqual(migrated.activeControls.clamshellMaximumDurationMinutes, 120)
+        XCTAssertEqual(migrated.activeControls.clamshellBatteryFloorPercent, 20)
+    }
+
+    func testPreferencesStorePersistsMigrationWithoutLegacyProfileFields() throws {
+        let suite = "ai.lovstudio.lumos.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let selectedProfileID = UUID()
+        let json = """
+        {
+          "version": 4,
+          "selectedProfileID": "\(selectedProfileID.uuidString)",
+          "activeControls": {
             "preventDisplayIdleSleep": false,
             "preventSystemIdleSleep": true,
             "requestClamshellProtection": false,
             "preferLowPowerMode": true
           },
-          "isBuiltIn": true
+          "profiles": [
+            {
+              "id": "\(selectedProfileID.uuidString)",
+              "watchedApplicationIDs": []
+            }
+          ],
+          "watchedApplications": []
         }
         """
+        defaults.set(Data(json.utf8), forKey: LumosPreferencesStore.defaultKey)
 
-        let decoded = try JSONDecoder().decode(LumosProfile.self, from: Data(json.utf8))
-        XCTAssertEqual(decoded.watchedApplicationIDs, [])
-        XCTAssertEqual(decoded.presetKind, .taskGuard)
-        XCTAssertEqual(decoded.controls.clamshellMaximumDurationMinutes, 120)
-        XCTAssertEqual(decoded.controls.clamshellBatteryFloorPercent, 20)
-    }
+        let store = LumosPreferencesStore(defaults: defaults)
+        XCTAssertEqual(store.load().version, LumosPreferences.schemaVersion)
 
-    func testLegacyPreferencesAddNewBuiltInsAndAdvanceSchemaVersion() {
-        let agent = LumosPreferences.agentMode
-        let migrated = LumosPreferences(
-            version: 1,
-            selectedProfileID: agent.id,
-            activeControls: agent.controls,
-            profiles: [agent],
-            watchedApplications: []
+        let migratedData = try XCTUnwrap(
+            defaults.data(forKey: LumosPreferencesStore.defaultKey)
         )
-
-        XCTAssertEqual(migrated.version, 2)
-        XCTAssertEqual(
-            migrated.profiles.map(\.presetKind),
-            [.taskGuard, .alwaysReachable, .keepDisplayAwake]
+        let migratedJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: migratedData) as? [String: Any]
         )
+        XCTAssertEqual(migratedJSON["version"] as? Int, LumosPreferences.schemaVersion)
+        XCTAssertNil(migratedJSON["selectedProfileID"])
+        XCTAssertNil(migratedJSON["profiles"])
     }
 
     func testTaskGuardRunsFromTargetTriggerThroughFinalTargetExit() throws {
@@ -591,6 +593,19 @@ final class LumosSpikeCoreTests: XCTestCase {
         XCTAssertEqual(completed.exitReason, .targetsFinished)
         XCTAssertEqual(assertions[0].releaseCount, 1)
         XCTAssertFalse(engine.isActive(.systemIdleSleep))
+
+        let rearmed = try controller.start(
+            PresetSessionContext(
+                presetKind: .taskGuard,
+                leaseKinds: [.systemIdleSleep],
+                hasConfiguredTargets: true,
+                matchedTargetCount: 1
+            ),
+            reason: "Rearmed Task Guard test"
+        )
+        XCTAssertEqual(rearmed.phase, .active)
+        XCTAssertEqual(assertions.count, 2)
+        XCTAssertTrue(engine.isActive(.systemIdleSleep))
     }
 
     func testTaskGuardWithoutConfiguredTargetsUsesManualSession() throws {
@@ -743,7 +758,7 @@ final class LumosSpikeCoreTests: XCTestCase {
         )
     }
 
-    func testClamshellActivationDoesNotTakeOwnershipOfExternalSetting() {
+    func testClamshellActivationRequiresExplicitApprovalForExternalSetting() {
         let marker = temporaryMarkerURL()
         var authorizationCalled = false
         let controller = ClamshellSleepController(
@@ -757,12 +772,66 @@ final class LumosSpikeCoreTests: XCTestCase {
             sleeper: { _ in }
         )
 
-        let result = controller.activate(maximumDurationMinutes: 120, batteryFloorPercent: 20)
+        let result = controller.activate(
+            maximumDurationMinutes: 120,
+            batteryFloorPercent: 20,
+            takeOverExisting: false
+        )
 
         XCTAssertEqual(result.state, .externallyManaged)
         XCTAssertEqual(result.snapshot.ownership, .external)
         XCTAssertFalse(authorizationCalled)
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testClamshellActivationTakesOverExternalSettingByDefault() {
+        let marker = temporaryMarkerURL()
+        defer { try? FileManager.default.removeItem(at: marker.deletingLastPathComponent()) }
+        var command = ""
+        let controller = ClamshellSleepController(
+            markerURL: marker,
+            processIdentifier: 4242,
+            statusReader: { "SleepDisabled 1" },
+            privilegedExecutor: {
+                command = $0
+                return .succeeded
+            },
+            sleeper: { _ in }
+        )
+
+        let result = controller.activate(
+            maximumDurationMinutes: 120,
+            batteryFloorPercent: 20
+        )
+
+        XCTAssertEqual(result.state, .activated)
+        XCTAssertEqual(result.snapshot.ownership, .lumos)
+        XCTAssertTrue(command.contains("/usr/bin/pmset -a disablesleep 1"))
+        XCTAssertTrue(command.contains("/usr/bin/pmset -a disablesleep 0"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testClamshellCanRestoreExternalSettingAfterExplicitApproval() {
+        let marker = temporaryMarkerURL()
+        var disabled = true
+        var command = ""
+        let controller = ClamshellSleepController(
+            markerURL: marker,
+            processIdentifier: 4242,
+            statusReader: { disabled ? "SleepDisabled 1" : "SleepDisabled 0" },
+            privilegedExecutor: {
+                command = $0
+                disabled = false
+                return .succeeded
+            },
+            sleeper: { _ in }
+        )
+
+        let result = controller.restoreSystemDefault()
+
+        XCTAssertEqual(result.state, .deactivated)
+        XCTAssertFalse(result.snapshot.isSleepDisabled)
+        XCTAssertEqual(command, "/usr/bin/pmset -a disablesleep 0")
     }
 
     func testClamshellActivationBuildsBoundedWatchdogAndRestoresOnStop() throws {
@@ -896,6 +965,26 @@ final class LumosSpikeCoreTests: XCTestCase {
 
         XCTAssertEqual(result.state, .cancelled)
         XCTAssertFalse(result.snapshot.isEnabled)
+    }
+
+    func testUnavailablePrivilegedHelperDoesNotFallBackToAnotherAuthorizationPrompt() {
+        let runtime = PrivilegedPowerRuntime.shared
+        let previousMode = runtime.mode
+        defer { runtime.configure(previousMode) }
+
+        var legacyCommandWasEvaluated = false
+        func legacyCommand() -> String {
+            legacyCommandWasEvaluated = true
+            return "/usr/bin/pmset -a disablesleep 0"
+        }
+
+        runtime.configure(.helperUnavailable("请先完成一次系统初始化。"))
+        let result = runtime.restoreClamshellSleep(
+            legacyCommand: legacyCommand()
+        )
+
+        XCTAssertEqual(result, .failed("请先完成一次系统初始化。"))
+        XCTAssertFalse(legacyCommandWasEvaluated)
     }
 
     func testWakeLeaseEngineSharesAssertionUntilFinalReceiptReleases() throws {

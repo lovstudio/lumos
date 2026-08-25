@@ -84,12 +84,14 @@ public final class LowPowerModeController {
 
     private let statusReader: StatusReader
     private let privilegedExecutor: PrivilegedExecutor
+    private let usesSharedPrivilegedRuntime: Bool
     private let sleeper: Sleeper
 
     public convenience init() {
         self.init(
             statusReader: Self.readSystemStatus,
             privilegedExecutor: PrivilegedCommandExecutor.execute,
+            usesSharedPrivilegedRuntime: true,
             sleeper: Thread.sleep(forTimeInterval:)
         )
     }
@@ -97,10 +99,12 @@ public final class LowPowerModeController {
     public init(
         statusReader: @escaping StatusReader,
         privilegedExecutor: @escaping PrivilegedExecutor,
+        usesSharedPrivilegedRuntime: Bool = false,
         sleeper: @escaping Sleeper = Thread.sleep(forTimeInterval:)
     ) {
         self.statusReader = statusReader
         self.privilegedExecutor = privilegedExecutor
+        self.usesSharedPrivilegedRuntime = usesSharedPrivilegedRuntime
         self.sleeper = sleeper
     }
 
@@ -153,7 +157,14 @@ public final class LowPowerModeController {
         }
 
         let command = "/usr/bin/pmset \(sourceFlag) lowpowermode \(enabled ? 1 : 0)"
-        switch privilegedExecutor(command) {
+        let updateResult = usesSharedPrivilegedRuntime
+            ? PrivilegedPowerRuntime.shared.setLowPowerMode(
+                enabled,
+                powerSource: before.powerSource,
+                legacyCommand: command
+            )
+            : privilegedExecutor(command)
+        switch updateResult {
         case .cancelled:
             return LowPowerModeTransition(
                 state: .cancelled,

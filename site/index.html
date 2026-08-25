@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lumos — 为未完成的事情，留一盏灯</title>
+    <meta
+      name="description"
+      content="Lumos 是面向长时间任务与 Agent 工作流的 macOS 低功耗防休眠菜单栏工具。"
+    />
+    <meta name="theme-color" content="#08111f" />
+    <link rel="canonical" href="https://lumos.lovstudio.ai/" />
+    <link rel="icon" href="/assets/lumos-icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Lumos" />
+    <meta property="og:title" content="Lumos — 为未完成的事情，留一盏灯" />
+    <meta
+      property="og:description"
+      content="守护正在运行的 App，让长任务继续；不需要的部分，交还给 macOS。"
+    />
+    <meta property="og:url" content="https://lumos.lovstudio.ai/" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Lumos",
+        "operatingSystem": "macOS 14 or later",
+        "applicationCategory": "UtilitiesApplication",
+        "softwareVersion": "0.1.0",
+        "downloadUrl": "https://lumos.lovstudio.ai/downloads/Lumos-0.1.0-arm64.dmg",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "CNY"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Lumos 首页">
+        <img src="/assets/lumos-icon.svg" alt="" width="36" height="36" />
+        <span>Lumos</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="#how-it-works">工作方式</a>
+        <a href="#boundaries">能力边界</a>
+        <a class="nav-download" href="/downloads/Lumos-0.1.0-arm64.dmg">下载</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> Lumos 0.1.0 · Apple Silicon</p>
+          <h1>为未完成的事情，<br /><em>留一盏灯。</em></h1>
+          <p class="hero-lead">
+            守护正在运行的 App，让构建、下载、导出和 Agent 任务继续；
+            不需要的屏幕与活动，仍然交还给 macOS。
+          </p>
+          <div class="hero-actions">
+            <a class="primary-action" href="/downloads/Lumos-0.1.0-arm64.dmg">
+              下载 Lumos
+              <span aria-hidden="true">↓</span>
+            </a>
+            <a class="quiet-action" href="/downloads/Lumos-0.1.0-arm64.dmg.sha256">
+              SHA-256 校验
+            </a>
+          </div>
+          <p class="requirements">macOS 14+ · Apple Silicon · Developer ID 签名与 Apple 公证</p>
+        </div>
+
+        <div class="product-stage" aria-label="Lumos 主面板示意">
+          <div class="halo halo-outer"></div>
+          <div class="halo halo-inner"></div>
+          <article class="app-panel">
+            <div class="panel-status">
+              <span class="status-icon">●</span>
+              <div>
+                <strong>正在守护</strong>
+                <small>2 个 App · 3 个进程</small>
+              </div>
+              <span class="state-pill">守护中</span>
+            </div>
+            <div class="guarded-app">
+              <span class="mini-icon cobalt">C</span>
+              <div><strong>Codex</strong><small>任务仍在运行</small></div>
+              <span class="live-dot"></span>
+            </div>
+            <div class="guarded-app">
+              <span class="mini-icon coral">S</span>
+              <div><strong>Screen Studio</strong><small>等待启动</small></div>
+              <span class="idle-dot"></span>
+            </div>
+            <div class="controls-label">控制</div>
+            <div class="control-row">
+              <span>保持任务运行</span><i class="switch on"></i><b>ⓘ</b>
+            </div>
+            <div class="control-row">
+              <span>保持屏幕唤醒</span><i class="switch"></i><b>ⓘ</b>
+            </div>
+            <div class="control-row">
+              <span>低功耗模式</span><i class="switch on"></i><b>ⓘ</b>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="principle" aria-label="产品原则">
+        <p>任务没做完，就别让它意外睡着。</p>
+        <p>不需要的部分，就不要继续耗电。</p>
+        <p>环境不再安全，就诚实地停下来。</p>
+      </section>
+
+      <section class="feature-section" id="how-it-works">
+        <div class="section-heading">
+          <p class="eyebrow"><span></span> 守护，应该可以解释</p>
+          <h2>只保留必要的清醒</h2>
+          <p>没有含糊的“大模式”。每一种系统行为，都可以单独看见、控制和撤回。</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card feature-wide">
+            <span class="feature-number">01</span>
+            <h3>跟着 App 自动启停</h3>
+            <p>首个守护 App 出现时申请必要的唤醒能力，最后一个退出后自动释放。App 再次启动，Lumos 会重新接手。</p>
+            <div class="signal-line" aria-hidden="true">
+              <span>等待启动</span><i></i><span class="active">守护中</span><i></i><span>自动恢复</span>
+            </div>
+          </article>
+          <article class="feature-card">
+            <span class="feature-number">02</span>
+            <h3>屏幕与任务分开控制</h3>
+            <p>任务可以继续，屏幕仍可按系统设置熄灭。需要演示时，也能只保持屏幕唤醒。</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-number">03</span>
+            <h3>每个开关都有说明</h3>
+            <p>点击最右侧 info 图标，查看功能解释、实现逻辑与注意事项。状态与边界不藏在文档深处。</p>
+          </article>
+          <article class="feature-card feature-accent">
+            <span class="feature-number">04</span>
+            <h3>系统安全优先</h3>
+            <p>低电量、严重过热或能力不可用时，Lumos 会降低或撤销高风险控制，并明确告诉你发生了什么。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="boundary-section" id="boundaries">
+        <div class="boundary-copy">
+          <p class="eyebrow"><span></span> 能力边界</p>
+          <h2>不把请求，说成保证。</h2>
+          <p>
+            macOS 的公开空闲休眠请求不会覆盖用户主动睡眠、低电量、热紧急状态或所有合盖情形。
+            Lumos 只把系统真实回读成功的能力显示为已开启。
+          </p>
+        </div>
+        <dl class="capability-list">
+          <div><dt>任务持续运行</dt><dd><span class="ready"></span>直接支持</dd></div>
+          <div><dt>屏幕保持唤醒</dt><dd><span class="ready"></span>直接支持</dd></div>
+          <div><dt>低功耗模式</dt><dd><span class="permission"></span>需要授权</dd></div>
+          <div><dt>合盖时保持运行</dt><dd><span class="experimental"></span>实验性</dd></div>
+        </dl>
+      </section>
+
+      <section class="download-section">
+        <img src="/assets/lumos-icon.svg" alt="Lumos 图标" width="112" height="112" />
+        <div>
+          <p class="eyebrow"><span></span> 现在开始</p>
+          <h2>让任务继续，让 Mac 少一点无谓的清醒。</h2>
+        </div>
+        <a class="primary-action" href="/downloads/Lumos-0.1.0-arm64.dmg">
+          下载 0.1.0
+          <span aria-hidden="true">↓</span>
+        </a>
+      </section>
+    </main>
+
+    <footer>
+      <p>© 2026 LovStudio · Lumos</p>
+      <p>实验性合盖能力受机型、系统、供电与散热条件影响。</p>
+    </footer>
+  </body>
+</html>

@@ -237,7 +237,8 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 执行进度：D1 的 `NSStatusItem + SwiftUI` 开发骨架已于 2026-08-24 落地；D2 的
 `WakeLeaseEngine`、D3 的 Workspace/PID/子进程观察层、D4 的事件驱动系统安全状态机，
 以及 D5 的三个 P0 Preset 会话闭环均已于 2026-08-25 落地。可通过
-`npx lovstudio app lumos dev` 启动；签名 `.app` 与后续 D6-D10 仍按下表推进。
+`npx lovstudio app lumos dev` 启动；D6-D7 与首个 Developer ID 签名、公证官网 DMG
+已在 v0.1.0 发布链中完成，自动更新、能耗基线与跨机型矩阵继续按下表推进。
 
 ### 第 1 周：建立可信的守护闭环
 
@@ -256,7 +257,7 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 | D6 | 灯芯+光环图标、当前状态/关注对象/降级文案 | VoiceOver、非颜色状态、两次点击内可解释 |
 | D7 | 版本化持久化与异常恢复 | kill -9、重启、目标已结束/仍运行四组合 |
 | D8 | 低频/事件驱动采样与能耗基线工具 | idle CPU 目标 <0.5%；与裸 caffeinate 同场景记录 |
-| D9 | Developer ID、Notarization、Sparkle 2 更新骨架 | 签名、公证、更新清单与失败回滚测试 |
+| D9 | Developer ID、Notarization、Sparkle 2 更新骨架 | v0.1.0 已完成签名、公证与官网 DMG；自动更新清单与失败回滚测试待后续版本 |
 | D10 | macOS 14/15/26 + 至少两类芯片 beta 矩阵 | 结果写入 capability registry；阻断虚假绿色状态 |
 
 两周结束的 definition of done：三个 P0 Preset 在已验证配置上形成 trigger → explain → assert → release → recover 闭环；P1 权限能力保持 feature flag 关闭。

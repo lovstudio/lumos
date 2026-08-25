@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "LumosSpikeCore", targets: ["LumosSpikeCore"]),
         .executable(name: "lumos-spike", targets: ["LumosSpike"]),
         .executable(name: "lumos-app", targets: ["LumosApp"]),
+        .executable(name: "lumos-privileged-helper", targets: ["LumosPrivilegedHelper"]),
     ],
     targets: [
         .target(
@@ -31,6 +32,13 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("SwiftUI"),
+            ]
+        ),
+        .executableTarget(
+            name: "LumosPrivilegedHelper",
+            dependencies: ["LumosSpikeCore"],
+            linkerSettings: [
+                .linkedFramework("Security"),
             ]
         ),
         .testTarget(

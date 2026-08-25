@@ -2,9 +2,8 @@ import AppKit
 import SwiftUI
 
 private enum LumosSettingsSection: String, CaseIterable, Identifiable {
+    case applications = "守护 App"
     case controls = "控制"
-    case profiles = "Profiles"
-    case applications = "应用白名单"
     case capabilities = "能力状态"
     case about = "关于"
 
@@ -12,9 +11,8 @@ private enum LumosSettingsSection: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .controls: "switch.2"
-        case .profiles: "slider.horizontal.3"
         case .applications: "app.badge.checkmark"
+        case .controls: "switch.2"
         case .capabilities: "checkmark.shield"
         case .about: "info.circle"
         }
@@ -23,7 +21,7 @@ private enum LumosSettingsSection: String, CaseIterable, Identifiable {
 
 struct LumosSettingsView: View {
     @ObservedObject var model: LumosAppModel
-    @State private var selection: LumosSettingsSection = .controls
+    @State private var selection: LumosSettingsSection = .applications
 
     var body: some View {
         NavigationSplitView {
@@ -39,7 +37,7 @@ struct LumosSettingsView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(model.statusText)
                             .font(.caption.weight(.medium))
-                        Text(model.selectedProfile.name)
+                        Text("守护 \(model.targetApplicationCount) 个 App · 运行中 \(model.matchedProcessCount) 个进程")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -50,12 +48,10 @@ struct LumosSettingsView: View {
         } detail: {
             Group {
                 switch selection {
-                case .controls:
-                    ControlSettingsView(model: model)
-                case .profiles:
-                    ProfileSettingsView(model: model)
                 case .applications:
                     ApplicationSettingsView(model: model)
+                case .controls:
+                    ControlSettingsView(model: model)
                 case .capabilities:
                     CapabilitySettingsView(model: model)
                 case .about:
@@ -72,15 +68,14 @@ struct LumosSettingsView: View {
 private struct ControlSettingsView: View {
     @ObservedObject var model: LumosAppModel
     @State private var confirmDisplaySleep = false
-    @State private var confirmClamshellMode = false
 
     var body: some View {
-        SettingsPage(title: "控制", subtitle: "为当前 Profile 组合原子能力。修改内置方案时，Lumos 会自动创建自定义副本。") {
+        SettingsPage(title: "控制", subtitle: "直接设置 Lumos 当前使用的守护能力，修改后立即生效。") {
             SettingsCard(title: "睡眠与显示器") {
                 SettingsToggleRow(
                     icon: "moon.zzz.fill",
-                    title: "防止空闲休眠",
-                    detail: "任务可继续运行，显示器仍可按时熄灭。",
+                    title: "保持任务运行",
+                    info: LumosFeatureInfoCatalog.keepTaskRunning,
                     isOn: Binding(
                         get: { model.preferences.activeControls.preventSystemIdleSleep },
                         set: { model.setControl(\.preventSystemIdleSleep, to: $0) }
@@ -91,8 +86,8 @@ private struct ControlSettingsView: View {
 
                 SettingsToggleRow(
                     icon: "display",
-                    title: "防止自动锁屏",
-                    detail: "保持显示器唤醒；通常比仅守护任务更耗电。",
+                    title: "保持屏幕唤醒",
+                    info: LumosFeatureInfoCatalog.keepDisplayAwake,
                     isOn: Binding(
                         get: { model.preferences.activeControls.preventDisplayIdleSleep },
                         set: { model.setControl(\.preventDisplayIdleSleep, to: $0) }
@@ -103,17 +98,11 @@ private struct ControlSettingsView: View {
 
                 SettingsToggleRow(
                     icon: "laptopcomputer",
-                    title: "防止合盖休眠（实验性）",
-                    detail: model.clamshellModeText,
+                    title: "合盖时保持运行",
+                    info: LumosFeatureInfoCatalog.clamshellProtection,
                     isOn: Binding(
-                        get: { model.preferences.activeControls.requestClamshellProtection },
-                        set: { enabled in
-                            if enabled {
-                                confirmClamshellMode = true
-                            } else {
-                                model.setClamshellProtection(false)
-                            }
-                        }
+                        get: { model.isClamshellControlPresentedOn },
+                        set: { model.setClamshellProtection($0) }
                     )
                 )
 
@@ -123,7 +112,7 @@ private struct ControlSettingsView: View {
                     SettingsPickerRow(
                         icon: "timer",
                         title: "最长持续时间",
-                        detail: "到时后由 root watchdog 自动恢复系统休眠。",
+                        info: LumosFeatureInfoCatalog.clamshellDuration,
                         selection: Binding(
                             get: { model.preferences.activeControls.clamshellMaximumDurationMinutes },
                             set: { model.setClamshellMaximumDuration($0) }
@@ -137,7 +126,7 @@ private struct ControlSettingsView: View {
                     SettingsPickerRow(
                         icon: "battery.25percent",
                         title: "电池安全线",
-                        detail: "使用电池并低于安全线时自动结束合盖模式。",
+                        info: LumosFeatureInfoCatalog.batteryFloor,
                         selection: Binding(
                             get: { model.preferences.activeControls.clamshellBatteryFloorPercent },
                             set: { model.setClamshellBatteryFloor($0) }
@@ -152,7 +141,7 @@ private struct ControlSettingsView: View {
                 SettingsToggleRow(
                     icon: "leaf.fill",
                     title: "低功耗模式",
-                    detail: model.powerModeText,
+                    info: LumosFeatureInfoCatalog.lowPowerMode,
                     isOn: Binding(
                         get: { model.lowPowerModeState.isEnabled },
                         set: { model.setLowPowerMode($0) }
@@ -164,7 +153,7 @@ private struct ControlSettingsView: View {
                 SettingsActionRow(
                     icon: "display.trianglebadge.exclamationmark",
                     title: "立即关闭显示器",
-                    detail: "调用 macOS 自带 pmset；不会让正在守护的任务休眠。",
+                    info: LumosFeatureInfoCatalog.displaySleepNow,
                     buttonTitle: "立即关闭"
                 ) {
                     confirmDisplaySleep = true
@@ -180,132 +169,6 @@ private struct ControlSettingsView: View {
         } message: {
             Text("移动鼠标或按下键盘即可再次点亮。")
         }
-        .confirmationDialog(
-            "启用实验性合盖模式？",
-            isPresented: $confirmClamshellMode
-        ) {
-            Button("启用实验性模式") {
-                model.setClamshellProtection(true)
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            let controls = model.preferences.activeControls
-            Text("开始守护时需要管理员授权。该设置会阻止所有系统休眠；Lumos 使用独立 watchdog 在退出、异常终止、超时或低电量时恢复。请保持电脑通风。当前系统状态：\(model.clamshellSleepState.detail) 最长 \(controls.clamshellMaximumDurationMinutes) 分钟，电池安全线 \(controls.clamshellBatteryFloorPercent)% 。")
-        }
-    }
-}
-
-private struct ProfileSettingsView: View {
-    @ObservedObject var model: LumosAppModel
-
-    var body: some View {
-        SettingsPage(title: "Profiles", subtitle: "把原子控制与应用白名单保存为可复用的工作方式。") {
-            SettingsCard(title: "当前方案") {
-                HStack(spacing: 12) {
-                    Text("Profile")
-                        .font(.body)
-
-                    Spacer()
-
-                    LumosProfileSelector(model: model, size: .regular)
-                }
-                .padding(14)
-
-                Divider()
-
-                HStack {
-                    Text("选择方案后可复制为自定义 Profile。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("复制") { model.duplicateSelectedProfile() }
-                    Button("删除", role: .destructive) { model.deleteSelectedProfile() }
-                        .disabled(model.selectedProfile.isBuiltIn)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
-
-            SettingsCard(title: "方案信息") {
-                VStack(spacing: 12) {
-                    LabeledContent("名称") {
-                        TextField("Profile 名称", text: Binding(
-                            get: { model.selectedProfile.name },
-                            set: { model.renameSelectedProfile($0) }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 290)
-                        .disabled(model.selectedProfile.isBuiltIn)
-                    }
-
-                    LabeledContent("说明") {
-                        TextField("用途说明", text: Binding(
-                            get: { model.selectedProfile.summary },
-                            set: { model.updateSelectedProfileSummary($0) }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 290)
-                        .disabled(model.selectedProfile.isBuiltIn)
-                    }
-                }
-                .padding(14)
-
-                if model.selectedProfile.isBuiltIn {
-                    Divider()
-                    Label("这是 Lumos 内置预设。修改任意控制或白名单时会自动创建副本。", systemImage: "lock.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(14)
-                }
-            }
-
-            SettingsCard(title: "组合摘要") {
-                VStack(alignment: .leading, spacing: 12) {
-                    LabeledContent("场景") {
-                        Text(model.selectedProfile.presetKind.title)
-                    }
-                    LabeledContent("触发") {
-                        Text(model.presetTriggerText)
-                            .foregroundStyle(.secondary)
-                    }
-                    LabeledContent("退出") {
-                        Text(model.presetExitText)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Divider()
-
-                    HStack(spacing: 8) {
-                        CapabilityChip(
-                            title: "任务唤醒",
-                            enabled: model.preferences.activeControls.preventSystemIdleSleep
-                        )
-                        CapabilityChip(
-                            title: "保持亮屏",
-                            enabled: model.preferences.activeControls.preventDisplayIdleSleep
-                        )
-                        CapabilityChip(
-                            title: "低功耗",
-                            enabled: model.preferences.activeControls.preferLowPowerMode
-                        )
-                        CapabilityChip(
-                            title: "合盖实验",
-                            enabled: model.preferences.activeControls.requestClamshellProtection
-                        )
-                    }
-
-                    Label(
-                        model.targetApplicationCount == 0
-                            ? "未限定应用"
-                            : "包含 \(model.targetApplicationCount) 个白名单应用",
-                        systemImage: "app.badge.checkmark"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                }
-                .padding(14)
-            }
-        }
     }
 }
 
@@ -314,7 +177,38 @@ private struct ApplicationSettingsView: View {
     @State private var searchText = ""
 
     var body: some View {
-        SettingsPage(title: "应用白名单", subtitle: "为“\(model.selectedProfile.name)”选择需要关注的应用。匹配数会显示在主界面。") {
+        SettingsPage(title: "守护 App", subtitle: "直接选择不能因 Mac 休眠而中断的 App。守护状态会同步显示在主面板。") {
+            SettingsCard(
+                title: "正在守护",
+                info: LumosFeatureInfoCatalog.guardedApplications
+            ) {
+                if model.guardedApplications.isEmpty {
+                    HStack(spacing: 12) {
+                        settingsIcon("app.badge.checkmark", color: .secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("还没有守护 App")
+                                .font(.callout.weight(.medium))
+                            Text("从下方正在运行的 App 中选择")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(14)
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(model.guardedApplications.enumerated()), id: \.element.id) { index, application in
+                            GuardedApplicationSettingsRow(application: application) {
+                                model.removeApplicationTarget(application.id)
+                            }
+                            if index != model.guardedApplications.count - 1 {
+                                Divider().padding(.leading, 54)
+                            }
+                        }
+                    }
+                }
+            }
+
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("搜索正在运行的应用", text: $searchText)
@@ -334,7 +228,10 @@ private struct ApplicationSettingsView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            SettingsCard(title: "正在运行") {
+            SettingsCard(
+                title: "添加正在运行的 App",
+                info: LumosFeatureInfoCatalog.addGuardedApplication
+            ) {
                 if filteredApplications.isEmpty {
                     ContentUnavailableView(
                         "没有匹配的应用",
@@ -361,7 +258,9 @@ private struct ApplicationSettingsView: View {
             }
 
             Label(
-                "任务守护已使用白名单作为自动触发边界：首个关注应用出现时开始，最后一个退出时释放系统 lease。其他 Preset 不依赖白名单触发。",
+                model.targetApplicationCount == 0
+                    ? "没有指定 App 时，开启控制后立即生效，直到你手动关闭。"
+                    : "首个守护 App 开始运行时自动生效，最后一个退出后自动停止。",
                 systemImage: "info.circle"
             )
             .font(.caption)
@@ -385,75 +284,108 @@ private struct CapabilitySettingsView: View {
     @ObservedObject var model: LumosAppModel
 
     var body: some View {
-        SettingsPage(title: "能力状态", subtitle: "Lumos 只把系统真实执行的能力标记为可用。") {
+        SettingsPage(title: "能力状态", subtitle: "查看 Lumos 当前可用的系统能力，以及需要授权或尚未就绪的功能。") {
             SettingsCard(title: "直接可用") {
                 CapabilityRow(
                     icon: "moon.zzz.fill",
                     title: "防止空闲休眠",
-                    detail: "IOKit PreventUserIdleSystemSleep",
+                    detail: "让任务持续运行，屏幕仍可按时熄灭",
                     status: "可用",
-                    color: .green
+                    color: .green,
+                    info: LumosFeatureInfoCatalog.keepTaskRunning
                 )
                 SettingsDivider()
                 CapabilityRow(
                     icon: "display",
-                    title: "防止显示器休眠",
-                    detail: "IOKit PreventUserIdleDisplaySleep",
+                    title: "保持屏幕唤醒",
+                    detail: "防止屏幕因闲置自动熄灭",
                     status: "可用",
-                    color: .green
+                    color: .green,
+                    info: LumosFeatureInfoCatalog.keepDisplayAwake
                 )
                 SettingsDivider()
                 CapabilityRow(
                     icon: "thermometer.medium",
                     title: "温度与低功耗状态",
-                    detail: "ProcessInfo 事件驱动监听",
+                    detail: "持续关注系统温度与节能状态",
                     status: model.thermalText,
-                    color: thermalColor
+                    color: thermalColor,
+                    info: LumosFeatureInfoCatalog.thermalState
                 )
                 SettingsDivider()
                 CapabilityRow(
                     icon: "battery.75percent",
                     title: "电源与电池",
-                    detail: "IOPowerSources 实时回读",
+                    detail: "实时读取供电方式与电池电量",
                     status: model.powerSourceState.detail,
-                    color: powerSourceColor
+                    color: powerSourceColor,
+                    info: LumosFeatureInfoCatalog.powerSource
                 )
                 SettingsDivider()
                 CapabilityRow(
                     icon: "network",
-                    title: "当前网络路径",
-                    detail: "NWPathMonitor 持续监听",
+                    title: "网络状态",
+                    detail: "持续关注网络是否可用或受限",
                     status: model.networkText,
-                    color: model.networkPathState?.status == .satisfied ? .green : .orange
+                    color: model.networkPathState?.status == .satisfied ? .green : .orange,
+                    info: LumosFeatureInfoCatalog.networkState
                 )
             }
 
-            SettingsCard(title: "受限能力") {
+            SettingsCard(title: "需要授权或尚未就绪") {
                 CapabilityRow(
                     icon: "laptopcomputer",
-                    title: "合盖休眠",
-                    detail: "pmset disablesleep + 限时安全 watchdog",
-                    status: model.clamshellSleepState.isSleepDisabled ? "已开启" : "需授权",
-                    color: model.clamshellSleepState.isSleepDisabled ? .green : .orange
+                    title: "合盖时保持运行",
+                    detail: clamshellCapabilityDetail,
+                    status: clamshellCapabilityStatus,
+                    color: clamshellCapabilityColor,
+                    info: LumosFeatureInfoCatalog.clamshellProtection
                 )
                 SettingsDivider()
                 CapabilityRow(
                     icon: "leaf.fill",
                     title: "切换低功耗模式",
-                    detail: "仅修改当前电源来源，执行后真实回读",
-                    status: model.lowPowerModeState.isEnabled ? "已开启" : "需授权",
-                    color: model.lowPowerModeState.isEnabled ? .green : .orange
+                    detail: "仅调整当前使用的电源来源；切换时需要管理员授权",
+                    status: lowPowerCapabilityStatus,
+                    color: lowPowerCapabilityColor,
+                    info: LumosFeatureInfoCatalog.lowPowerMode
                 )
                 SettingsDivider()
                 CapabilityRow(
                     icon: "chart.bar.xaxis",
-                    title: "同类产品功耗对比",
-                    detail: "尚未完成统一硬件与负载基线采样",
-                    status: "待校准",
-                    color: .secondary
+                    title: "能耗对比",
+                    detail: "尚未完成同一设备、同一负载下的基准采样",
+                    status: "暂无基准",
+                    color: .secondary,
+                    info: LumosFeatureInfoCatalog.energyComparison
                 )
             }
         }
+    }
+
+    private var clamshellCapabilityStatus: String {
+        model.clamshellSleepState.isSleepDisabled ? "已开启" : "未开启"
+    }
+
+    private var clamshellCapabilityDetail: String {
+        model.clamshellSleepState.isSleepDisabled
+            ? "合盖后任务继续运行"
+            : "合盖后电脑正常休眠"
+    }
+
+    private var clamshellCapabilityColor: Color {
+        guard model.clamshellSleepState.isSleepDisabled else { return .secondary }
+        return model.clamshellSleepState.ownership == .lumos ? .green : .orange
+    }
+
+    private var lowPowerCapabilityStatus: String {
+        guard model.lowPowerModeState.isAvailable else { return "不可用" }
+        return model.lowPowerModeState.isEnabled ? "已开启" : "已关闭"
+    }
+
+    private var lowPowerCapabilityColor: Color {
+        guard model.lowPowerModeState.isAvailable else { return .orange }
+        return model.lowPowerModeState.isEnabled ? .green : .secondary
     }
 
     private var thermalColor: Color {
@@ -476,7 +408,7 @@ private struct CapabilitySettingsView: View {
 }
 
 private struct AboutSettingsView: View {
-    private let website = URL(string: "https://lovstudio.ai")!
+    private let website = URL(string: "https://lumos.lovstudio.ai")!
 
     var body: some View {
         SettingsPage(
@@ -544,7 +476,7 @@ private struct AboutSettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text("lovstudio.ai")
+                        Text("lumos.lovstudio.ai")
                             .font(.callout)
                             .foregroundStyle(Color.accentColor)
                         Image(systemName: "arrow.up.right")
@@ -628,14 +560,31 @@ private struct SettingsPage<Content: View>: View {
 
 private struct SettingsCard<Content: View>: View {
     let title: String
+    let info: LumosFeatureInfo?
     @ViewBuilder let content: Content
+
+    init(
+        title: String,
+        info: LumosFeatureInfo? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.info = info
+        self.content = content()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let info {
+                    LumosInfoButton(info: info)
+                }
+            }
+            .padding(.horizontal, 4)
             VStack(spacing: 0) { content }
                 .background(Color(nsColor: .controlBackgroundColor).opacity(0.78))
                 .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
@@ -650,20 +599,18 @@ private struct SettingsCard<Content: View>: View {
 private struct SettingsToggleRow: View {
     let icon: String
     let title: String
-    let detail: String
+    let info: LumosFeatureInfo
     @Binding var isOn: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             settingsIcon(icon)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.callout.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
+            Text(title).font(.callout.weight(.medium))
             Spacer()
             Toggle("", isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
+            LumosInfoButton(info: info)
         }
         .padding(14)
     }
@@ -672,7 +619,7 @@ private struct SettingsToggleRow: View {
 private struct SettingsPickerRow: View {
     let icon: String
     let title: String
-    let detail: String
+    let info: LumosFeatureInfo
     @Binding var selection: Int
     let options: [Int]
     let valueLabel: (Int) -> String
@@ -680,10 +627,7 @@ private struct SettingsPickerRow: View {
     var body: some View {
         HStack(spacing: 12) {
             settingsIcon(icon)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.callout.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
+            Text(title).font(.callout.weight(.medium))
             Spacer()
             Picker("", selection: $selection) {
                 ForEach(options, id: \.self) { option in
@@ -692,6 +636,7 @@ private struct SettingsPickerRow: View {
             }
             .labelsHidden()
             .frame(width: 120)
+            LumosInfoButton(info: info)
         }
         .padding(14)
     }
@@ -700,19 +645,17 @@ private struct SettingsPickerRow: View {
 private struct SettingsActionRow: View {
     let icon: String
     let title: String
-    let detail: String
+    let info: LumosFeatureInfo
     let buttonTitle: String
     let action: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
             settingsIcon(icon)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.callout.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
+            Text(title).font(.callout.weight(.medium))
             Spacer()
             Button(buttonTitle, action: action)
+            LumosInfoButton(info: info)
         }
         .padding(14)
     }
@@ -724,6 +667,7 @@ private struct CapabilityRow: View {
     let detail: String
     let status: String
     let color: Color
+    let info: LumosFeatureInfo
 
     var body: some View {
         HStack(spacing: 12) {
@@ -736,23 +680,49 @@ private struct CapabilityRow: View {
             Text(status)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(color)
+            LumosInfoButton(info: info)
         }
         .padding(14)
     }
 }
 
-private struct CapabilityChip: View {
-    let title: String
-    let enabled: Bool
+private struct GuardedApplicationSettingsRow: View {
+    let application: GuardedApplicationState
+    let remove: () -> Void
 
     var body: some View {
-        Label(title, systemImage: enabled ? "checkmark.circle.fill" : "minus.circle")
-            .font(.caption.weight(.medium))
-            .foregroundStyle(enabled ? Color.accentColor : .secondary)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background((enabled ? Color.accentColor : Color.secondary).opacity(0.1))
-            .clipShape(Capsule())
+        HStack(spacing: 11) {
+            Image(nsImage: applicationIcon(for: application.executablePath))
+                .resizable()
+                .scaledToFit()
+                .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(application.displayName)
+                    .font(.callout.weight(.medium))
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(application.isRunning ? Color.green : Color.secondary.opacity(0.5))
+                        .frame(width: 6, height: 6)
+                    Text(application.isRunning ? runningDetail : "未运行 · 等待启动")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button("移除", role: .destructive, action: remove)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+    }
+
+    private var runningDetail: String {
+        application.instanceCount == 1
+            ? "运行中 · 1 个进程"
+            : "运行中 · \(application.instanceCount) 个进程"
     }
 }
 
@@ -762,7 +732,7 @@ private struct ApplicationTargetRow: View {
 
     var body: some View {
         HStack(spacing: 11) {
-            Image(nsImage: applicationIcon)
+            Image(nsImage: applicationIcon(for: application.executablePath))
                 .resizable()
                 .scaledToFit()
                 .frame(width: 30, height: 30)
@@ -783,16 +753,6 @@ private struct ApplicationTargetRow: View {
         .padding(.vertical, 9)
     }
 
-    private var applicationIcon: NSImage {
-        guard var path = application.executablePath else {
-            return NSWorkspace.shared.icon(for: .application)
-        }
-        if let range = path.range(of: ".app/") {
-            path = String(path[..<range.upperBound].dropLast())
-        }
-        return NSWorkspace.shared.icon(forFile: path)
-    }
-
     private var applicationProcessDetail: String {
         let count = application.instanceCount == 1
             ? "1 个进程"
@@ -800,6 +760,16 @@ private struct ApplicationTargetRow: View {
         guard application.unobservableInstanceCount > 0 else { return count }
         return "\(count) · \(application.unobservableInstanceCount) 个身份不可读取"
     }
+}
+
+private func applicationIcon(for executablePath: String?) -> NSImage {
+    guard var path = executablePath else {
+        return NSWorkspace.shared.icon(for: .application)
+    }
+    if let range = path.range(of: ".app/") {
+        path = String(path[..<range.upperBound].dropLast())
+    }
+    return NSWorkspace.shared.icon(forFile: path)
 }
 
 private struct SettingsDivider: View {

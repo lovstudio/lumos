@@ -1,5 +1,8 @@
 .DS_Store
 .build/
+dist/
+site/.vercel/
+site/downloads/*.dmg
+site/downloads/*.sha256
 .swiftpm/
 DerivedData/
-
