@@ -6,6 +6,7 @@ private enum LumosSettingsSection: String, CaseIterable, Identifiable {
     case profiles = "Profiles"
     case applications = "应用白名单"
     case capabilities = "能力状态"
+    case about = "关于"
 
     var id: String { rawValue }
 
@@ -15,6 +16,7 @@ private enum LumosSettingsSection: String, CaseIterable, Identifiable {
         case .profiles: "slider.horizontal.3"
         case .applications: "app.badge.checkmark"
         case .capabilities: "checkmark.shield"
+        case .about: "info.circle"
         }
     }
 }
@@ -56,6 +58,8 @@ struct LumosSettingsView: View {
                     ApplicationSettingsView(model: model)
                 case .capabilities:
                     CapabilitySettingsView(model: model)
+                case .about:
+                    AboutSettingsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -468,6 +472,133 @@ private struct CapabilitySettingsView: View {
             return .orange
         }
         return .green
+    }
+}
+
+private struct AboutSettingsView: View {
+    private let website = URL(string: "https://lovstudio.ai")!
+
+    var body: some View {
+        SettingsPage(
+            title: "关于 Lumos",
+            subtitle: "产品版本、设计理念与品牌信息。"
+        ) {
+            VStack(spacing: 11) {
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor)
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 72, height: 72)
+
+                VStack(spacing: 4) {
+                    Text("Lumos")
+                        .font(.system(size: 26, weight: .bold))
+                    Text("为未完成的事情，留一盏灯。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Text(versionText)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.vertical, 22)
+            .frame(maxWidth: .infinity)
+
+            SettingsCard(title: "产品信息") {
+                AboutInfoRow(
+                    icon: "shippingbox.fill",
+                    title: "Bundle ID",
+                    value: "ai.lovstudio.lumos"
+                )
+
+                SettingsDivider()
+
+                AboutInfoRow(
+                    icon: "bolt.heart.fill",
+                    title: "产品理念",
+                    value: "不让任务睡着，也不让电脑白白醒着。"
+                )
+            }
+
+            SettingsCard(title: "品牌") {
+                AboutInfoRow(
+                    icon: "hammer.fill",
+                    title: "设计与开发",
+                    value: "手工川工作室 · LovStudio"
+                )
+
+                SettingsDivider()
+
+                Link(destination: website) {
+                    HStack(spacing: 12) {
+                        settingsIcon("globe")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("官方网站")
+                                .font(.callout.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text("了解手工川工作室与更多 LovStudio 产品")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("lovstudio.ai")
+                            .font(.callout)
+                            .foregroundStyle(Color.accentColor)
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .padding(14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            Text("© 2026 手工川工作室 · LovStudio")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 2)
+        }
+    }
+
+    private var versionText: String {
+        let dictionary = Bundle.main.infoDictionary
+        guard let version = dictionary?["CFBundleShortVersionString"] as? String,
+              !version.isEmpty else {
+            return "开发预览版"
+        }
+
+        guard let build = dictionary?["CFBundleVersion"] as? String,
+              !build.isEmpty,
+              build != version else {
+            return "版本 \(version)"
+        }
+        return "版本 \(version)（\(build)）"
+    }
+}
+
+private struct AboutInfoRow: View {
+    let icon: String
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            settingsIcon(icon)
+            Text(title)
+                .font(.callout.weight(.medium))
+            Spacer(minLength: 18)
+            Text(value)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+        .padding(14)
     }
 }
 

@@ -1,3 +1,4 @@
+import AppKit
 import LumosSpikeCore
 import SwiftUI
 
@@ -53,18 +54,123 @@ struct LumosProfileSelector: View {
                         Circle()
                             .fill(Color.primary.opacity(isHovering || isPresented ? 0.12 : 0.075))
                     )
+                    .background {
+                        LumosAnchoredPopover(
+                            isPresented: $isPresented,
+                            content: LumosProfilePopover(
+                                model: model,
+                                isPresented: $isPresented
+                            )
+                        )
+                        .frame(width: size.circleSize, height: size.circleSize)
+                    }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovering)
-        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-            LumosProfilePopover(model: model, isPresented: $isPresented)
-        }
         .help("切换 Profile")
         .accessibilityLabel("选择 Profile")
         .accessibilityValue(model.selectedProfile.name)
+    }
+}
+
+private struct LumosAnchoredPopover<Content: View>: NSViewRepresentable {
+    @Binding var isPresented: Bool
+    let content: Content
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isPresented: $isPresented)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let anchor = NSView()
+        anchor.setAccessibilityElement(false)
+        return anchor
+    }
+
+    func updateNSView(_ anchor: NSView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.isPresented = $isPresented
+        if let hostingController = coordinator.popover.contentViewController
+            as? NSHostingController<Content> {
+            hostingController.rootView = content
+        } else {
+            coordinator.popover.contentViewController = NSHostingController(rootView: content)
+        }
+
+        if isPresented {
+            coordinator.present(from: anchor)
+        } else {
+            coordinator.close()
+        }
+    }
+
+    static func dismantleNSView(_ anchor: NSView, coordinator: Coordinator) {
+        coordinator.close()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSPopoverDelegate {
+        let popover = NSPopover()
+        var isPresented: Binding<Bool>
+
+        init(isPresented: Binding<Bool>) {
+            self.isPresented = isPresented
+            super.init()
+
+            popover.behavior = .transient
+            popover.animates = true
+            popover.delegate = self
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(applicationDidResignActive),
+                name: NSApplication.didResignActiveNotification,
+                object: nil
+            )
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        func present(from anchor: NSView) {
+            guard !popover.isShown else { return }
+
+            guard anchor.window != nil else {
+                DispatchQueue.main.async { [weak self, weak anchor] in
+                    guard let self,
+                          let anchor,
+                          anchor.window != nil,
+                          self.isPresented.wrappedValue else { return }
+                    self.present(from: anchor)
+                }
+                return
+            }
+
+            popover.show(
+                relativeTo: anchor.bounds,
+                of: anchor,
+                preferredEdge: .minY
+            )
+        }
+
+        func close() {
+            guard popover.isShown else { return }
+            popover.performClose(nil)
+        }
+
+        @objc private func applicationDidResignActive() {
+            close()
+        }
+
+        func popoverDidClose(_ notification: Notification) {
+            guard isPresented.wrappedValue else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.isPresented.wrappedValue = false
+            }
+        }
     }
 }
 
