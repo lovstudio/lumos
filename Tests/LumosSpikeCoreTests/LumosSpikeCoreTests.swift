@@ -185,6 +185,231 @@ final class LumosSpikeCoreTests: XCTestCase {
         XCTAssertGreaterThan(snapshot.physicalMemoryBytes, 0)
     }
 
+    func testPowerSourceBuilderCalculatesBatteryPercentage() {
+        let snapshot = PowerSourceSnapshotBuilder.build(
+            providingSource: "Battery Power",
+            currentCapacity: 45,
+            maximumCapacity: 60,
+            isCharging: false
+        )
+
+        XCTAssertTrue(snapshot.isAvailable)
+        XCTAssertEqual(snapshot.kind, .battery)
+        XCTAssertEqual(snapshot.batteryLevelPercent, 75)
+        XCTAssertEqual(snapshot.isCharging, false)
+        XCTAssertEqual(snapshot.detail, "电池供电 · 电池 75%")
+    }
+
+    func testLivePowerSourceSnapshotDoesNotExposeUnknownValuesAsFacts() {
+        let snapshot = PowerSourceProbe.snapshot()
+
+        if snapshot.isAvailable {
+            XCTAssertNotEqual(snapshot.kind, .unknown)
+        } else {
+            XCTAssertEqual(snapshot.kind, .unknown)
+        }
+        if let batteryLevel = snapshot.batteryLevelPercent {
+            XCTAssertTrue((0...100).contains(batteryLevel))
+        }
+    }
+
+    func testSafetyPolicyUsesNormalFiveSecondCorrectionInterval() {
+        let decision = SystemSafetyPolicy.evaluate(
+            makeSafetySnapshot(),
+            batteryFloorPercent: 20
+        )
+
+        XCTAssertEqual(decision.severity, .normal)
+        XCTAssertEqual(decision.conditions, [])
+        XCTAssertEqual(decision.refreshInterval, 5)
+        XCTAssertFalse(decision.shouldReleaseDisplayLease)
+        XCTAssertFalse(decision.shouldReleaseSystemLease)
+        XCTAssertFalse(decision.shouldEndClamshellProtection)
+    }
+
+    func testSafetyPolicyLowersSamplingForLowPowerAndFairThermalState() {
+        let decision = SystemSafetyPolicy.evaluate(
+            makeSafetySnapshot(lowPowerModeEnabled: true, thermalState: .fair),
+            batteryFloorPercent: 20
+        )
+
+        XCTAssertEqual(decision.severity, .efficient)
+        XCTAssertEqual(Set(decision.conditions), [.lowPowerMode, .thermalFair])
+        XCTAssertEqual(decision.refreshInterval, 15)
+        XCTAssertFalse(decision.shouldReleaseDisplayLease)
+        XCTAssertFalse(decision.shouldReleaseSystemLease)
+    }
+
+    func testSafetyPolicyRetractsDisplayAndClamshellAtSeriousThermalState() {
+        let decision = SystemSafetyPolicy.evaluate(
+            makeSafetySnapshot(thermalState: .serious),
+            batteryFloorPercent: 20
+        )
+
+        XCTAssertEqual(decision.severity, .degraded)
+        XCTAssertTrue(decision.shouldReleaseDisplayLease)
+        XCTAssertFalse(decision.shouldReleaseSystemLease)
+        XCTAssertTrue(decision.shouldEndClamshellProtection)
+    }
+
+    func testSafetyPolicyReleasesAllLeasesAtCriticalThermalState() {
+        let decision = SystemSafetyPolicy.evaluate(
+            makeSafetySnapshot(thermalState: .critical),
+            batteryFloorPercent: 20
+        )
+
+        XCTAssertEqual(decision.severity, .critical)
+        XCTAssertTrue(decision.shouldReleaseDisplayLease)
+        XCTAssertTrue(decision.shouldReleaseSystemLease)
+        XCTAssertTrue(decision.shouldEndClamshellProtection)
+        XCTAssertEqual(decision.refreshInterval, 60)
+    }
+
+    func testSafetyPolicyAppliesBatteryFloorOnlyWhileUsingBattery() {
+        let battery = PowerSourceSnapshotBuilder.build(
+            providingSource: "Battery Power",
+            currentCapacity: 20,
+            maximumCapacity: 100,
+            isCharging: false
+        )
+        let ac = PowerSourceSnapshotBuilder.build(
+            providingSource: "AC Power",
+            currentCapacity: 20,
+            maximumCapacity: 100,
+            isCharging: false
+        )
+
+        let batteryDecision = SystemSafetyPolicy.evaluate(
+            makeSafetySnapshot(powerSource: battery),
+            batteryFloorPercent: 20
+        )
+        let acDecision = SystemSafetyPolicy.evaluate(
+            makeSafetySnapshot(powerSource: ac),
+            batteryFloorPercent: 20
+        )
+
+        XCTAssertTrue(batteryDecision.conditions.contains(.batteryAtOrBelowFloor))
+        XCTAssertTrue(batteryDecision.shouldEndClamshellProtection)
+        XCTAssertFalse(acDecision.conditions.contains(.batteryAtOrBelowFloor))
+        XCTAssertFalse(acDecision.shouldEndClamshellProtection)
+    }
+
+    func testSafetyPolicyDoesNotEnableHighRiskControlsFromUnknownReadings() {
+        let unknownThermal = SystemSafetyPolicy.evaluate(
+            makeSafetySnapshot(
+                thermalState: .unknown,
+                powerSource: .unavailable
+            ),
+            batteryFloorPercent: 20
+        )
+        let unknownBatteryLevel = PowerSourceSnapshot(
+            isAvailable: true,
+            kind: .battery,
+            batteryLevelPercent: nil,
+            isCharging: nil,
+            detail: "电池供电 · 电量未知"
+        )
+        let unknownBattery = SystemSafetyPolicy.evaluate(
+            makeSafetySnapshot(powerSource: unknownBatteryLevel),
+            batteryFloorPercent: 20
+        )
+
+        XCTAssertEqual(unknownThermal.severity, .degraded)
+        XCTAssertTrue(unknownThermal.shouldReleaseDisplayLease)
+        XCTAssertTrue(unknownThermal.shouldEndClamshellProtection)
+        XCTAssertTrue(unknownBattery.conditions.contains(.batteryLevelUnknown))
+        XCTAssertTrue(unknownBattery.shouldEndClamshellProtection)
+    }
+
+    func testSafetyStateMachineReportsOnlyDecisionChanges() {
+        let machine = SystemSafetyStateMachine()
+        let first = machine.ingest(makeSafetySnapshot(), batteryFloorPercent: 20)
+        let same = machine.ingest(
+            makeSafetySnapshot(observedAt: Date(timeIntervalSince1970: 2)),
+            batteryFloorPercent: 20
+        )
+        let changed = machine.ingest(
+            makeSafetySnapshot(thermalState: .serious),
+            batteryFloorPercent: 20
+        )
+
+        XCTAssertTrue(first.didChange)
+        XCTAssertFalse(same.didChange)
+        XCTAssertTrue(changed.didChange)
+    }
+
+    func testSafetyMonitorRespondsToProcessInfoNotification() {
+        let notificationCenter = NotificationCenter()
+        let systemState = TestLockedBox(
+            makeSystemState(lowPowerModeEnabled: false, thermalState: .nominal)
+        )
+        let receivedEvent = TestLockedBox<SystemSafetyEvent?>(nil)
+        let monitor = SystemSafetyMonitor(
+            systemStateReader: { systemState.value },
+            powerSourceReader: {
+                PowerSourceSnapshotBuilder.build(
+                    providingSource: "AC Power",
+                    currentCapacity: 100,
+                    maximumCapacity: 100,
+                    isCharging: false
+                )
+            },
+            clock: { Date(timeIntervalSince1970: 1) },
+            notificationCenter: notificationCenter,
+            sources: .processInfo
+        )
+        monitor.start { event in
+            if event.reason == .lowPowerMode {
+                receivedEvent.value = event
+            }
+        }
+
+        systemState.value = makeSystemState(
+            lowPowerModeEnabled: true,
+            thermalState: .nominal
+        )
+        notificationCenter.post(
+            name: Notification.Name.NSProcessInfoPowerStateDidChange,
+            object: nil
+        )
+        monitor.stop()
+
+        XCTAssertEqual(receivedEvent.value?.reason, .lowPowerMode)
+        XCTAssertEqual(receivedEvent.value?.snapshot.systemState.lowPowerModeEnabled, true)
+    }
+
+    func testSafetyMonitorRespondsToThermalNotification() {
+        let notificationCenter = NotificationCenter()
+        let systemState = TestLockedBox(
+            makeSystemState(lowPowerModeEnabled: false, thermalState: .nominal)
+        )
+        let receivedEvent = TestLockedBox<SystemSafetyEvent?>(nil)
+        let monitor = SystemSafetyMonitor(
+            systemStateReader: { systemState.value },
+            powerSourceReader: { .unavailable },
+            notificationCenter: notificationCenter,
+            sources: .processInfo
+        )
+        monitor.start { event in
+            if event.reason == .thermalState {
+                receivedEvent.value = event
+            }
+        }
+
+        systemState.value = makeSystemState(
+            lowPowerModeEnabled: false,
+            thermalState: .serious
+        )
+        notificationCenter.post(
+            name: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil
+        )
+        monitor.stop()
+
+        XCTAssertEqual(receivedEvent.value?.reason, .thermalState)
+        XCTAssertEqual(receivedEvent.value?.snapshot.systemState.thermalState, .serious)
+    }
+
     func testDisplaySleepCommandIsAvailable() {
         XCTAssertTrue(DisplaySleepProbe.isAvailable)
     }
@@ -584,10 +809,69 @@ final class LumosSpikeCoreTests: XCTestCase {
             .appendingPathComponent("lumos-tests-\(UUID().uuidString)", isDirectory: true)
             .appendingPathComponent("clamshell-session.json")
     }
+
+    private func makeSystemState(
+        lowPowerModeEnabled: Bool = false,
+        thermalState: ThermalStateLabel = .nominal
+    ) -> SystemStateSnapshot {
+        SystemStateSnapshot(
+            lowPowerModeEnabled: lowPowerModeEnabled,
+            thermalState: thermalState,
+            operatingSystemVersion: "test",
+            processorCount: 8,
+            activeProcessorCount: 8,
+            physicalMemoryBytes: 16_000_000_000
+        )
+    }
+
+    private func makeSafetySnapshot(
+        lowPowerModeEnabled: Bool = false,
+        thermalState: ThermalStateLabel = .nominal,
+        powerSource: PowerSourceSnapshot? = nil,
+        networkPath: NetworkPathSnapshot? = nil,
+        observedAt: Date = Date(timeIntervalSince1970: 1)
+    ) -> SystemSafetySnapshot {
+        SystemSafetySnapshot(
+            systemState: makeSystemState(
+                lowPowerModeEnabled: lowPowerModeEnabled,
+                thermalState: thermalState
+            ),
+            powerSource: powerSource ?? PowerSourceSnapshotBuilder.build(
+                providingSource: "AC Power",
+                currentCapacity: 100,
+                maximumCapacity: 100,
+                isCharging: false
+            ),
+            networkPath: networkPath ?? NetworkPathSnapshot(
+                status: .satisfied,
+                isExpensive: false,
+                isConstrained: false,
+                supportsIPv4: true,
+                supportsIPv6: true,
+                supportsDNS: true,
+                interfaces: ["wifi:en0"]
+            ),
+            observedAt: observedAt
+        )
+    }
 }
 
 private enum TestWakeLeaseError: Error {
     case expectedFailure
+}
+
+private final class TestLockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: Value
+
+    init(_ value: Value) {
+        storedValue = value
+    }
+
+    var value: Value {
+        get { lock.withLock { storedValue } }
+        set { lock.withLock { storedValue = newValue } }
+    }
 }
 
 private final class FakeWakeAssertion: WakeAssertionHandle {

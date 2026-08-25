@@ -34,6 +34,8 @@ private func usage() {
 
         Usage:
           lumos-spike system-state
+          lumos-spike safety-state
+          lumos-spike power-source
           lumos-spike clamshell-state
           lumos-spike low-power-state
           lumos-spike apps
@@ -63,6 +65,27 @@ private func run() throws {
 
     case "system-state":
         try printJSON(SystemStateProbe.snapshot())
+
+    case "safety-state":
+        let snapshot = SystemSafetySnapshot(
+            systemState: SystemStateProbe.snapshot(),
+            powerSource: PowerSourceProbe.snapshot(),
+            networkPath: NetworkProbe.currentPath(),
+            observedAt: Date()
+        )
+        struct SafetyResult: Encodable {
+            let snapshot: SystemSafetySnapshot
+            let decision: SystemSafetyDecision
+        }
+        try printJSON(
+            SafetyResult(
+                snapshot: snapshot,
+                decision: SystemSafetyPolicy.evaluate(snapshot, batteryFloorPercent: 20)
+            )
+        )
+
+    case "power-source":
+        try printJSON(PowerSourceProbe.snapshot())
 
     case "clamshell-state":
         try printJSON(ClamshellSleepController().snapshot())

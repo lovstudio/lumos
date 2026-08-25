@@ -16,7 +16,10 @@ final class LumosAppModel: ObservableObject {
     @Published private(set) var systemLeaseActive = false
     @Published private(set) var displayLeaseActive = false
     @Published private(set) var guardStartedAt: Date?
-    @Published private(set) var systemState = SystemStateProbe.snapshot()
+    @Published private(set) var systemState: SystemStateSnapshot
+    @Published private(set) var powerSourceState: PowerSourceSnapshot
+    @Published private(set) var networkPathState: NetworkPathSnapshot?
+    @Published private(set) var safetyDecision: SystemSafetyDecision
     @Published private(set) var clamshellSleepState: ClamshellSleepSnapshot
     @Published private(set) var lowPowerModeState: LowPowerModeSnapshot
     @Published private(set) var runningApplications: [ApplicationCandidate] = []
@@ -30,8 +33,11 @@ final class LumosAppModel: ObservableObject {
     private let lowPowerModeController: LowPowerModeController
     private let wakeLeaseEngine: WakeLeaseEngine
     private let processObservationProvider: ProcessObservationProvider
+    private let safetyMonitor: SystemSafetyMonitor
+    private let safetyStateMachine: SystemSafetyStateMachine
     private var guardLease: WakeLeaseReceipt?
     private var refreshTimer: Timer?
+    private var refreshTimerInterval: TimeInterval?
     private var workspaceObservationTokens: [NSObjectProtocol] = []
 
     init(
@@ -39,26 +45,45 @@ final class LumosAppModel: ObservableObject {
         clamshellSleepController: ClamshellSleepController = ClamshellSleepController(),
         lowPowerModeController: LowPowerModeController = LowPowerModeController(),
         wakeLeaseEngine: WakeLeaseEngine = WakeLeaseEngine(),
-        processObservationProvider: ProcessObservationProvider = ProcessObservationProvider()
+        processObservationProvider: ProcessObservationProvider = ProcessObservationProvider(),
+        safetyMonitor: SystemSafetyMonitor = SystemSafetyMonitor(),
+        safetyStateMachine: SystemSafetyStateMachine = SystemSafetyStateMachine()
     ) {
+        let loadedPreferences = store.load()
+        let initialSystemState = SystemStateProbe.snapshot()
+        let initialPowerSource = PowerSourceProbe.snapshot()
+        let initialSafetySnapshot = SystemSafetySnapshot(
+            systemState: initialSystemState,
+            powerSource: initialPowerSource,
+            networkPath: nil,
+            observedAt: Date()
+        )
+
         self.store = store
         self.clamshellSleepController = clamshellSleepController
         self.lowPowerModeController = lowPowerModeController
         self.wakeLeaseEngine = wakeLeaseEngine
         self.processObservationProvider = processObservationProvider
-        self.preferences = store.load()
+        self.safetyMonitor = safetyMonitor
+        self.safetyStateMachine = safetyStateMachine
+        self.preferences = loadedPreferences
+        self.systemState = initialSystemState
+        self.powerSourceState = initialPowerSource
+        self.networkPathState = nil
+        self.safetyDecision = SystemSafetyPolicy.evaluate(
+            initialSafetySnapshot,
+            batteryFloorPercent: loadedPreferences.activeControls.clamshellBatteryFloorPercent
+        )
         self.clamshellSleepState = clamshellSleepController.reconcileStaleSession()
         self.lowPowerModeState = lowPowerModeController.snapshot()
-        refreshAll()
+        refreshRunningApplications()
         observeWorkspaceLifecycle()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        safetyMonitor.start { [weak self] event in
             Task { @MainActor in
-                self?.refreshAll()
+                self?.applySafetyEvent(event)
             }
         }
-        if let refreshTimer {
-            RunLoop.main.add(refreshTimer, forMode: .common)
-        }
+        scheduleRefreshTimer(interval: safetyDecision.refreshInterval)
     }
 
     var selectedProfile: LumosProfile {
@@ -70,6 +95,9 @@ final class LumosAppModel: ObservableObject {
     }
 
     var statusText: String {
+        if safetyDecision.severity == .critical {
+            return safetyDecision.detail
+        }
         guard isGuardActive else { return "守护已暂停" }
         if preferences.activeControls.requestClamshellProtection,
            clamshellSleepState.isSleepDisabled {
@@ -99,6 +127,20 @@ final class LumosAppModel: ObservableObject {
         lowPowerModeState.detail
     }
 
+    var networkText: String {
+        guard let networkPathState else { return "正在确认网络状态" }
+        if networkPathState.status != .satisfied {
+            return "网络不可达"
+        }
+        if networkPathState.isConstrained {
+            return "网络受限"
+        }
+        if networkPathState.isExpensive {
+            return "计费网络"
+        }
+        return "网络正常"
+    }
+
     var clamshellModeText: String {
         if clamshellSleepState.isSleepDisabled {
             return clamshellSleepState.ownership == .lumos
@@ -106,6 +148,9 @@ final class LumosAppModel: ObservableObject {
                 : "系统睡眠已关闭 · 非本次 Lumos 控制"
         }
         if preferences.activeControls.requestClamshellProtection {
+            if isGuardActive, safetyDecision.shouldEndClamshellProtection {
+                return "已因安全状态结束 · 重新开始后授权"
+            }
             return "守护开始时请求管理员授权"
         }
         return "实验性 · 需管理员授权"
@@ -123,10 +168,14 @@ final class LumosAppModel: ObservableObject {
     }
 
     func refreshAll() {
-        systemState = SystemStateProbe.snapshot()
+        lowPowerModeState = lowPowerModeController.snapshot()
+        refreshCorrectionSnapshots()
+        safetyMonitor.refresh(reason: .manual)
+    }
+
+    private func refreshCorrectionSnapshots() {
         let previousClamshellState = clamshellSleepState
         clamshellSleepState = clamshellSleepController.snapshot()
-        lowPowerModeState = lowPowerModeController.snapshot()
         refreshRunningApplications()
 
         if previousClamshellState.ownership == .lumos,
@@ -134,12 +183,6 @@ final class LumosAppModel: ObservableObject {
            isGuardActive,
            preferences.activeControls.requestClamshellProtection {
             lastError = "合盖模式已由安全 watchdog 结束；当前仍保留普通任务守护。"
-        }
-
-        if clamshellSleepState.ownership == .lumos,
-           (systemState.thermalState == .serious || systemState.thermalState == .critical) {
-            stopGuard()
-            lastError = "检测到温度过高，Lumos 已结束合盖模式并恢复系统休眠。"
         }
     }
 
@@ -194,6 +237,19 @@ final class LumosAppModel: ObservableObject {
             return
         }
 
+        guard !safetyDecision.shouldReleaseSystemLease else {
+            lastError = "当前温度不允许开始守护。请等待 macOS 恢复正常热状态。"
+            statusDidChange?()
+            return
+        }
+
+        if controls.requestClamshellProtection,
+           safetyDecision.shouldEndClamshellProtection {
+            lastError = "当前电源、电量或温度状态不允许启用合盖守护。"
+            statusDidChange?()
+            return
+        }
+
         if controls.requestClamshellProtection {
             let transition = clamshellSleepController.activate(
                 maximumDurationMinutes: controls.clamshellMaximumDurationMinutes,
@@ -212,7 +268,14 @@ final class LumosAppModel: ObservableObject {
         }
 
         do {
-            try synchronizeWakeLease(with: controls)
+            let effectiveControls = effectiveControlsForSafety(controls)
+            guard effectiveControls.preventSystemIdleSleep
+                    || effectiveControls.preventDisplayIdleSleep else {
+                lastError = safetyDecision.detail
+                statusDidChange?()
+                return
+            }
+            try synchronizeWakeLease(with: effectiveControls)
             guardStartedAt = Date()
             lastError = nil
         } catch {
@@ -321,7 +384,7 @@ final class LumosAppModel: ObservableObject {
     func setLowPowerMode(_ enabled: Bool) {
         let transition = lowPowerModeController.setEnabled(enabled)
         lowPowerModeState = transition.snapshot
-        systemState = SystemStateProbe.snapshot()
+        safetyMonitor.refresh(reason: .lowPowerMode)
 
         switch transition.state {
         case .updated, .unchanged:
@@ -388,6 +451,8 @@ final class LumosAppModel: ObservableObject {
 
     func shutdown() {
         refreshTimer?.invalidate()
+        refreshTimerInterval = nil
+        safetyMonitor.stop()
         let notificationCenter = NSWorkspace.shared.notificationCenter
         workspaceObservationTokens.forEach(notificationCenter.removeObserver)
         workspaceObservationTokens.removeAll()
@@ -413,6 +478,115 @@ final class LumosAppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private func applySafetyEvent(_ event: SystemSafetyEvent) {
+        systemState = event.snapshot.systemState
+        powerSourceState = event.snapshot.powerSource
+        networkPathState = event.snapshot.networkPath
+        lowPowerModeState = lowPowerSnapshot(from: event.snapshot)
+
+        let transition = safetyStateMachine.ingest(
+            event.snapshot,
+            batteryFloorPercent: preferences.activeControls.clamshellBatteryFloorPercent
+        )
+        safetyDecision = transition.current
+        scheduleRefreshTimer(interval: transition.current.refreshInterval)
+
+        guard isGuardActive else {
+            statusDidChange?()
+            return
+        }
+
+        if transition.current.shouldReleaseSystemLease {
+            stopGuard()
+            return
+        }
+
+        if transition.current.shouldEndClamshellProtection,
+           clamshellSleepState.ownership == .lumos {
+            let clamshellTransition = clamshellSleepController.deactivate()
+            clamshellSleepState = clamshellTransition.snapshot
+            if clamshellTransition.state == .failed {
+                lastError = clamshellTransition.message
+                statusDidChange?()
+                return
+            }
+        }
+
+        let effectiveControls = effectiveControlsForSafety(preferences.activeControls)
+        guard effectiveControls.preventSystemIdleSleep
+                || effectiveControls.preventDisplayIdleSleep else {
+            releaseGuardLease()
+            guardStartedAt = nil
+            statusDidChange?()
+            return
+        }
+
+        do {
+            try synchronizeWakeLease(with: effectiveControls)
+        } catch {
+            lastError = String(describing: error)
+        }
+        statusDidChange?()
+    }
+
+    private func scheduleRefreshTimer(interval: TimeInterval) {
+        guard refreshTimerInterval != interval else { return }
+        refreshTimer?.invalidate()
+        refreshTimerInterval = interval
+
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshCorrectionSnapshots()
+                self?.safetyMonitor.refresh(reason: .manual)
+            }
+        }
+        refreshTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func effectiveControlsForSafety(
+        _ controls: AtomicControlPreferences
+    ) -> AtomicControlPreferences {
+        var effective = controls
+        if controls.requestClamshellProtection,
+           clamshellSleepState.isSleepDisabled {
+            effective.preventSystemIdleSleep = true
+        }
+        if safetyDecision.shouldReleaseDisplayLease {
+            effective.preventDisplayIdleSleep = false
+        }
+        if safetyDecision.shouldReleaseSystemLease {
+            effective.preventSystemIdleSleep = false
+        }
+        return effective
+    }
+
+    private func lowPowerSnapshot(
+        from safetySnapshot: SystemSafetySnapshot
+    ) -> LowPowerModeSnapshot {
+        let source: LowPowerModePowerSource = switch safetySnapshot.powerSource.kind {
+        case .acPower: .acPower
+        case .battery: .battery
+        case .ups: .ups
+        case .unknown: .unknown
+        }
+        let sourceLabel = switch source {
+        case .acPower: "接通电源时"
+        case .battery: "使用电池时"
+        case .ups: "使用 UPS 时"
+        case .unknown: "当前"
+        }
+        let isAvailable = safetySnapshot.powerSource.isAvailable && source != .unknown
+        return LowPowerModeSnapshot(
+            isAvailable: isAvailable,
+            isEnabled: safetySnapshot.systemState.lowPowerModeEnabled,
+            powerSource: source,
+            detail: isAvailable
+                ? "\(sourceLabel)低功耗已\(safetySnapshot.systemState.lowPowerModeEnabled ? "开启" : "关闭")"
+                : "无法确认当前电源来源的低功耗状态。"
+        )
     }
 
     private func ensureEditableProfile() {
@@ -478,14 +652,20 @@ final class LumosAppModel: ObservableObject {
             }
         }
         if controls.requestClamshellProtection,
-           !clamshellSleepState.isSleepDisabled {
+           !clamshellSleepState.isSleepDisabled,
+           !safetyDecision.shouldEndClamshellProtection {
             stopGuard()
             lastError = "合盖模式设置已改变，请重新开始守护并完成管理员授权。"
             return
         }
-        var effectiveControls = controls
-        if controls.requestClamshellProtection {
-            effectiveControls.preventSystemIdleSleep = true
+        let effectiveControls = effectiveControlsForSafety(controls)
+        guard effectiveControls.preventSystemIdleSleep
+                || effectiveControls.preventDisplayIdleSleep else {
+            releaseGuardLease()
+            guardStartedAt = nil
+            lastError = safetyDecision.detail
+            statusDidChange?()
+            return
         }
         do {
             try synchronizeWakeLease(with: effectiveControls)

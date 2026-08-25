@@ -1,14 +1,39 @@
 import Foundation
 import Network
 
+public enum NetworkPathStatus: String, Codable, Equatable, Sendable {
+    case satisfied
+    case requiresConnection
+    case unsatisfied
+    case unknown
+}
+
 public struct NetworkPathSnapshot: Codable, Equatable, Sendable {
-    public let status: String
+    public let status: NetworkPathStatus
     public let isExpensive: Bool
     public let isConstrained: Bool
     public let supportsIPv4: Bool
     public let supportsIPv6: Bool
     public let supportsDNS: Bool
     public let interfaces: [String]
+
+    public init(
+        status: NetworkPathStatus,
+        isExpensive: Bool,
+        isConstrained: Bool,
+        supportsIPv4: Bool,
+        supportsIPv6: Bool,
+        supportsDNS: Bool,
+        interfaces: [String]
+    ) {
+        self.status = status
+        self.isExpensive = isExpensive
+        self.isConstrained = isConstrained
+        self.supportsIPv4 = supportsIPv4
+        self.supportsIPv6 = supportsIPv6
+        self.supportsDNS = supportsDNS
+        self.interfaces = interfaces
+    }
 }
 
 private final class NetworkSnapshotBox: @unchecked Sendable {
@@ -41,12 +66,12 @@ public enum NetworkProbe {
         return box.get()
     }
 
-    private static func snapshot(_ path: NWPath) -> NetworkPathSnapshot {
-        let status: String = switch path.status {
-        case .satisfied: "satisfied"
-        case .requiresConnection: "requiresConnection"
-        case .unsatisfied: "unsatisfied"
-        @unknown default: "unknown"
+    public static func snapshot(_ path: NWPath) -> NetworkPathSnapshot {
+        let status: NetworkPathStatus = switch path.status {
+        case .satisfied: .satisfied
+        case .requiresConnection: .requiresConnection
+        case .unsatisfied: .unsatisfied
+        @unknown default: .unknown
         }
 
         return NetworkPathSnapshot(

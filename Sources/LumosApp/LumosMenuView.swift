@@ -54,7 +54,7 @@ struct LumosMenuView: View {
                     Text("Lumos")
                         .font(.system(size: 16, weight: .semibold))
                     Circle()
-                        .fill(model.isGuardActive ? Color.green : Color.secondary.opacity(0.5))
+                        .fill(statusColor)
                         .frame(width: 7, height: 7)
                 }
                 Text(model.statusText)
@@ -198,10 +198,18 @@ struct LumosMenuView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             HStack(spacing: 5) {
-                Image(systemName: "thermometer.medium")
-                Text(model.thermalText)
+                Image(systemName: safetySymbol)
+                Text(model.safetyDecision.detail)
+            }
+            .font(.caption2)
+            .foregroundStyle(safetyColor)
+            .padding(.horizontal, 2)
+
+            HStack(spacing: 5) {
+                Image(systemName: "battery.75percent")
+                Text(model.powerSourceState.detail)
                 Text("·")
-                Text("功耗数据将在真实采样后显示")
+                Text(model.networkText)
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -252,6 +260,32 @@ struct LumosMenuView: View {
             return "\(model.selectedProfile.name) · 未限定应用"
         }
         return "\(model.selectedProfile.name) · \(model.targetApplicationCount) 个应用"
+    }
+
+    private var statusColor: Color {
+        switch model.safetyDecision.severity {
+        case .critical: .red
+        case .degraded: .orange
+        case .efficient: model.isGuardActive ? .yellow : .secondary.opacity(0.5)
+        case .normal: model.isGuardActive ? .green : .secondary.opacity(0.5)
+        }
+    }
+
+    private var safetyColor: Color {
+        switch model.safetyDecision.severity {
+        case .critical: .red
+        case .degraded: .orange
+        case .efficient, .normal: .secondary
+        }
+    }
+
+    private var safetySymbol: String {
+        switch model.safetyDecision.severity {
+        case .critical: "exclamationmark.triangle.fill"
+        case .degraded: "exclamationmark.circle.fill"
+        case .efficient: "leaf.fill"
+        case .normal: "checkmark.circle.fill"
+        }
     }
 
     private var clamshellWarning: String {

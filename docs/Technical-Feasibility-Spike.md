@@ -130,6 +130,17 @@ Lumos 的 P0 行为：
 - thermal serious：提示并撤销非关键 display lease；
 - thermal critical：释放可撤销 lease，把决策交还系统，并明确说明任务连续性可能中断。
 
+D4 已把这些规则落入 `SystemSafetyMonitor + SystemSafetyStateMachine`：
+
+- `ProcessInfo` 的 Low Power 与 Thermal 通知触发即时重评；
+- `IOPSNotificationCreateRunLoopSource` 监听电源来源和电池容量变化，只读取容量、供电与充电字段；
+- 一个常驻 `NWPathMonitor` 监听网络路径，网络不可达只降级“随时可达”解释，不误停本地任务；
+- 正常状态每 5 秒做一次校正，Low Power/fair/受限网络为 15 秒，degraded 为 30 秒，critical 为 60 秒；
+- serious 或电池安全线撤销 display lease 与 Lumos 自有合盖保护，保留必要 system lease；critical 释放全部 lease。
+
+状态机只对 Lumos 拥有的能力执行回退，不会清除外部 `SleepDisabled`。IOPowerSources
+读取失败时显示 unknown/degraded，不从缺失数据推断低电量。
+
 切换 Low Power Mode 不进入 P0。本机实测 `/usr/bin/pmset` 修改需要 root；当前 P1 switch
 通过固定命令的一次性管理员授权执行，根据实时电源来源选择 `-b`、`-c` 或 `-u`，避免用
 `-a` 覆盖另一套策略，并在执行后回读。若未来引入 Helper，仍必须单独做 threat model、
@@ -212,9 +223,9 @@ P0 的 assertion 是进程作用域，崩溃不会永久修改系统设置。恢
 ## 7. 两周 MVP 计划
 
 执行进度：D1 的 `NSStatusItem + SwiftUI` 开发骨架已于 2026-08-24 落地；D2 的
-`WakeLeaseEngine`、按类型引用计数、receipt 生命周期和 IOPM driver，以及 D3 的
-Workspace/PID/子进程观察层均已于 2026-08-25 落地。可通过
-`npx lovstudio app lumos dev` 启动；签名 `.app`、完整状态模型和后续 D4-D10 仍按下表推进。
+`WakeLeaseEngine`、D3 的 Workspace/PID/子进程观察层，以及 D4 的事件驱动系统安全状态机
+均已于 2026-08-25 落地。可通过 `npx lovstudio app lumos dev` 启动；签名 `.app`、
+任务状态模型和后续 D5-D10 仍按下表推进。
 
 ### 第 1 周：建立可信的守护闭环
 
@@ -223,7 +234,7 @@ Workspace/PID/子进程观察层均已于 2026-08-25 落地。可通过
 | D1 | Xcode App、`NSStatusItem + SwiftUI` 骨架、领域类型 | App 可启动/退出，菜单栏状态可测 |
 | D2 | `WakeLeaseEngine`、引用计数、IOPM driver | 已完成：共享 assertion、最终引用释放、失败回滚、析构与真实 IOKit 生命周期测试 |
 | D3 | Workspace/PID/子进程 provider | 已完成：App 生命周期刷新、真实进程启动/退出、命令树、PID 复用与不可观察语义测试 |
-| D4 | ProcessInfo、IOPowerSources、NWPath safety monitors | Low Power/Thermal/电源变化状态机测试 |
+| D4 | ProcessInfo、IOPowerSources、NWPath safety monitors | 已完成：Low Power/Thermal 通知、电源/电池/网络回读和安全动作状态机测试 |
 | D5 | 任务守护/保持亮屏/随时可达三个 Preset | 从 trigger 到 lease 到 exit 的端到端测试 |
 
 ### 第 2 周：解释、恢复与可分发性

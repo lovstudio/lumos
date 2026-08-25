@@ -389,9 +389,25 @@ private struct CapabilitySettingsView: View {
                 CapabilityRow(
                     icon: "thermometer.medium",
                     title: "温度与低功耗状态",
-                    detail: "ProcessInfo 实时只读",
+                    detail: "ProcessInfo 事件驱动监听",
                     status: model.thermalText,
-                    color: .green
+                    color: thermalColor
+                )
+                SettingsDivider()
+                CapabilityRow(
+                    icon: "battery.75percent",
+                    title: "电源与电池",
+                    detail: "IOPowerSources 实时回读",
+                    status: model.powerSourceState.detail,
+                    color: powerSourceColor
+                )
+                SettingsDivider()
+                CapabilityRow(
+                    icon: "network",
+                    title: "当前网络路径",
+                    detail: "NWPathMonitor 持续监听",
+                    status: model.networkText,
+                    color: model.networkPathState?.status == .satisfied ? .green : .orange
                 )
             }
 
@@ -421,6 +437,24 @@ private struct CapabilitySettingsView: View {
                 )
             }
         }
+    }
+
+    private var thermalColor: Color {
+        switch model.systemState.thermalState {
+        case .critical: .red
+        case .serious, .unknown: .orange
+        case .fair: .yellow
+        case .nominal: .green
+        }
+    }
+
+    private var powerSourceColor: Color {
+        guard model.powerSourceState.isAvailable else { return .orange }
+        if model.safetyDecision.conditions.contains(.batteryAtOrBelowFloor)
+            || model.safetyDecision.conditions.contains(.batteryLevelUnknown) {
+            return .orange
+        }
+        return .green
     }
 }
 

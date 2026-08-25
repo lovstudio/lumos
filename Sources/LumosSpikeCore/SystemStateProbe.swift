@@ -25,6 +25,22 @@ public struct SystemStateSnapshot: Codable, Equatable, Sendable {
     public let processorCount: Int
     public let activeProcessorCount: Int
     public let physicalMemoryBytes: UInt64
+
+    public init(
+        lowPowerModeEnabled: Bool,
+        thermalState: ThermalStateLabel,
+        operatingSystemVersion: String,
+        processorCount: Int,
+        activeProcessorCount: Int,
+        physicalMemoryBytes: UInt64
+    ) {
+        self.lowPowerModeEnabled = lowPowerModeEnabled
+        self.thermalState = thermalState
+        self.operatingSystemVersion = operatingSystemVersion
+        self.processorCount = processorCount
+        self.activeProcessorCount = activeProcessorCount
+        self.physicalMemoryBytes = physicalMemoryBytes
+    }
 }
 
 public enum SystemStateProbe {
@@ -39,4 +55,3 @@ public enum SystemStateProbe {
         )
     }
 }
-
