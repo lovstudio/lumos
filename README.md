@@ -4,7 +4,7 @@
 
 Lumos 是一款面向长时间任务与 Agent 工作流的 macOS 低功耗防休眠菜单栏工具。
 
-当前版本：**v0.1.0** · Apple Silicon · macOS 14+
+当前版本：**v0.2.0** · Apple Silicon · macOS 14+
 
 [从 Lumos 官网下载](https://lumos.lovstudio.ai/) · [查看更新记录](CHANGELOG.md)
 
@@ -77,6 +77,7 @@ npx lovstudio app lumos probe low-power-state
 - 主面板把正在守护的 App 提升到控制开关之前，直接显示“守护中”“运行中”或“等待启动”，并提供一级管理入口；
 - 保持任务运行、保持屏幕唤醒、合盖运行与低功耗模式四个直接开关；方案选择、复制、编辑与自定义配置已从当前产品范围移除；
 - 每个功能项最右侧提供原生 info 图标；点击后显示使用 Markdown 编写的功能解释、实现逻辑与注意事项，移开鼠标不会自动弹出；
+- 设置中可直接开启“登录时自动启动”；Lumos 通过 macOS 官方登录项服务登记主应用，并在切换后回读真实状态；
 - 可持久化的直接控制和守护 App；运行实例数来自稳定进程身份，权限不足时明确显示身份不可读取；
 - 本次守护时长、真实运行目标数，以及实时电源、温度、网络与安全降级状态；
 - 能力状态页明确区分直接可用、需要授权与当前不可用的功能。
@@ -92,7 +93,7 @@ npx lovstudio app lumos probe low-power-state
 正式版本通过 Developer ID 签名并由 Apple 公证：
 
 ```text
-https://lumos.lovstudio.ai/downloads/Lumos-0.1.0-arm64.dmg
+https://lumos.lovstudio.ai/downloads/Lumos-0.2.0-arm64.dmg
 ```
 
 打开 DMG 后，将 Lumos 拖入“应用程序”文件夹。首次启用合盖运行或低功耗切换时，

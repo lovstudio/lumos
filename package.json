@@ -1,7 +1,7 @@
 {
   "name": "lumos",
-  "version": "0.1.0",
-  "buildNumber": 1,
+  "version": "0.2.0",
+  "buildNumber": 2,
   "private": true,
   "description": "A low-power macOS wake lease for unfinished work.",
   "license": "UNLICENSED",
