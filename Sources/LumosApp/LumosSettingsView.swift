@@ -197,8 +197,15 @@ private struct ProfileSettingsView: View {
     var body: some View {
         SettingsPage(title: "Profiles", subtitle: "把原子控制与应用白名单保存为可复用的工作方式。") {
             SettingsCard(title: "当前方案") {
-                LumosProfileSelector(model: model, size: .regular)
-                    .padding(14)
+                HStack(spacing: 12) {
+                    Text("Profile")
+                        .font(.body)
+
+                    Spacer()
+
+                    LumosProfileSelector(model: model, size: .regular)
+                }
+                .padding(14)
 
                 Divider()
 
