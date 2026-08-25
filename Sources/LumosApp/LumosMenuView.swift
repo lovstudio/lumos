@@ -132,23 +132,24 @@ struct LumosMenuView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("高级")
 
-            HStack(spacing: 11) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Profile")
-                        .font(.callout.weight(.medium))
-                    Text(profileTargetSummary)
-                        .font(.caption)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 11) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.secondary)
+                        .frame(width: 22)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("运行方案")
+                            .font(.callout.weight(.medium))
+                        Text(profileTargetSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
-                Spacer()
-
-                LumosProfileMenu(model: model, size: .compact)
+                LumosPresetSegmentedPicker(model: model)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)

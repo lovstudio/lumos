@@ -25,7 +25,7 @@ final class LumosAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate 
 
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 390, height: 520)
+        popover.contentSize = NSSize(width: 390, height: 555)
         popover.contentViewController = NSHostingController(
             rootView: LumosMenuView(model: model) { [weak self] in
                 self?.showSettings()

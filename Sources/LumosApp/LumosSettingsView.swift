@@ -197,21 +197,21 @@ private struct ProfileSettingsView: View {
     var body: some View {
         SettingsPage(title: "Profiles", subtitle: "把原子控制与应用白名单保存为可复用的工作方式。") {
             SettingsCard(title: "当前方案") {
-                HStack(spacing: 12) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 28)
+                LumosProfileSelectionList(model: model)
 
-                    LumosProfileMenu(model: model, size: .regular)
+                Divider()
 
+                HStack {
+                    Text("选择方案后可复制为自定义 Profile。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Spacer()
-
                     Button("复制") { model.duplicateSelectedProfile() }
                     Button("删除", role: .destructive) { model.deleteSelectedProfile() }
                         .disabled(model.selectedProfile.isBuiltIn)
                 }
-                .padding(14)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
 
             SettingsCard(title: "方案信息") {
