@@ -71,6 +71,19 @@ private struct ControlSettingsView: View {
 
     var body: some View {
         SettingsPage(title: "控制", subtitle: "直接设置 Lumos 当前使用的守护能力，修改后立即生效。") {
+            SettingsCard(title: "启动") {
+                SettingsToggleRow(
+                    icon: "power",
+                    title: "登录时自动启动",
+                    detail: model.launchAtLoginState.detail,
+                    info: LumosFeatureInfoCatalog.launchAtLogin,
+                    isOn: Binding(
+                        get: { model.isLaunchAtLoginPresentedOn },
+                        set: { model.setLaunchAtLogin($0) }
+                    )
+                )
+            }
+
             SettingsCard(title: "睡眠与显示器") {
                 SettingsToggleRow(
                     icon: "moon.zzz.fill",
@@ -599,17 +612,40 @@ private struct SettingsCard<Content: View>: View {
 private struct SettingsToggleRow: View {
     let icon: String
     let title: String
+    let detail: String?
     let info: LumosFeatureInfo
     @Binding var isOn: Bool
+
+    init(
+        icon: String,
+        title: String,
+        detail: String? = nil,
+        info: LumosFeatureInfo,
+        isOn: Binding<Bool>
+    ) {
+        self.icon = icon
+        self.title = title
+        self.detail = detail
+        self.info = info
+        self._isOn = isOn
+    }
 
     var body: some View {
         HStack(spacing: 12) {
             settingsIcon(icon)
-            Text(title).font(.callout.weight(.medium))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.callout.weight(.medium))
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Spacer()
             Toggle("", isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
+                .accessibilityLabel(title)
             LumosInfoButton(info: info)
         }
         .padding(14)

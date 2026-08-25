@@ -6,6 +6,24 @@ struct LumosFeatureInfo: Equatable {
 }
 
 enum LumosFeatureInfoCatalog {
+    static let launchAtLogin = LumosFeatureInfo(
+        title: "登录时自动启动",
+        markdown: """
+        ## 功能解释
+        登录 macOS 后自动启动 Lumos，并直接驻留在菜单栏，不需要手动打开 App。
+
+        ## 实现逻辑
+        - 使用 macOS 官方 `SMAppService.mainApp` 注册或注销主应用登录项。
+        - 每次打开设置都会回读系统真实状态，不单独保存一个可能失真的偏好值。
+        - 关闭开关后立即注销登录项，不影响当前正在运行的 Lumos。
+
+        ## 注意事项
+        - 只有放在“应用程序”文件夹中的正式 Lumos 才能配置该功能。
+        - 如果你曾在系统设置中禁止 Lumos，macOS 可能要求在“登录项与扩展”中重新允许。
+        - 自动启动只负责打开 Lumos；是否执行守护取决于你选择的 App 和控制项。
+        """
+    )
+
     static let guardedApplications = LumosFeatureInfo(
         title: "守护 App",
         markdown: """

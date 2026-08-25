@@ -54,6 +54,14 @@ final class LumosAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         updateStatusItem()
 
         let arguments = Set(ProcessInfo.processInfo.arguments.dropFirst())
+        if arguments.contains("--enable-launch-at-login") {
+            model.setLaunchAtLogin(true)
+            print("Lumos launch-at-login: \(model.launchAtLoginState.detail)")
+        }
+        if arguments.contains("--disable-launch-at-login") {
+            model.setLaunchAtLogin(false)
+            print("Lumos launch-at-login: \(model.launchAtLoginState.detail)")
+        }
         if arguments.contains("--show-menu") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
                 self?.showPopover()

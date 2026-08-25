@@ -33,6 +33,7 @@ final class LumosAppModel: ObservableObject {
     @Published private(set) var safetyDecision: SystemSafetyDecision
     @Published private(set) var clamshellSleepState: ClamshellSleepSnapshot
     @Published private(set) var lowPowerModeState: LowPowerModeSnapshot
+    @Published private(set) var launchAtLoginState: LaunchAtLoginSnapshot
     @Published private(set) var runningApplications: [ApplicationCandidate] = []
     @Published private(set) var recentProcessEvents: [ProcessObservationEvent] = []
     @Published private(set) var lastError: String?
@@ -42,6 +43,7 @@ final class LumosAppModel: ObservableObject {
     private let store: LumosPreferencesStore
     private let clamshellSleepController: ClamshellSleepController
     private let lowPowerModeController: LowPowerModeController
+    private let launchAtLoginController: LaunchAtLoginController
     private let presetSessionController: PresetSessionController
     private let processObservationProvider: ProcessObservationProvider
     private let safetyMonitor: SystemSafetyMonitor
@@ -54,6 +56,7 @@ final class LumosAppModel: ObservableObject {
         store: LumosPreferencesStore = LumosPreferencesStore(),
         clamshellSleepController: ClamshellSleepController = ClamshellSleepController(),
         lowPowerModeController: LowPowerModeController = LowPowerModeController(),
+        launchAtLoginController: LaunchAtLoginController = LaunchAtLoginController(),
         wakeLeaseEngine: WakeLeaseEngine = WakeLeaseEngine(),
         processObservationProvider: ProcessObservationProvider = ProcessObservationProvider(),
         safetyMonitor: SystemSafetyMonitor = SystemSafetyMonitor(),
@@ -72,6 +75,7 @@ final class LumosAppModel: ObservableObject {
         self.store = store
         self.clamshellSleepController = clamshellSleepController
         self.lowPowerModeController = lowPowerModeController
+        self.launchAtLoginController = launchAtLoginController
         self.presetSessionController = PresetSessionController(wakeLeaseEngine: wakeLeaseEngine)
         self.processObservationProvider = processObservationProvider
         self.safetyMonitor = safetyMonitor
@@ -86,6 +90,7 @@ final class LumosAppModel: ObservableObject {
         )
         self.clamshellSleepState = clamshellSleepController.reconcileStaleSession()
         self.lowPowerModeState = lowPowerModeController.snapshot()
+        self.launchAtLoginState = launchAtLoginController.snapshot()
         refreshRunningApplications()
         observeWorkspaceLifecycle()
         safetyMonitor.start { [weak self] event in
@@ -189,6 +194,10 @@ final class LumosAppModel: ObservableObject {
             || clamshellSleepState.isSleepDisabled
     }
 
+    var isLaunchAtLoginPresentedOn: Bool {
+        launchAtLoginState.isRegistered
+    }
+
     var hasExternalClamshellControl: Bool {
         clamshellSleepState.isSleepDisabled
             && clamshellSleepState.ownership == .external
@@ -231,6 +240,7 @@ final class LumosAppModel: ObservableObject {
 
     func refreshAll() {
         lowPowerModeState = lowPowerModeController.snapshot()
+        launchAtLoginState = launchAtLoginController.snapshot()
         refreshCorrectionSnapshots()
         safetyMonitor.refresh(reason: .manual)
     }
@@ -441,6 +451,19 @@ final class LumosAppModel: ObservableObject {
             lastError = nil
         case .cancelled, .failed:
             lastError = transition.message
+        }
+        statusDidChange?()
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        let update = launchAtLoginController.setEnabled(enabled)
+        launchAtLoginState = update.snapshot
+
+        switch update.state {
+        case .updated, .unchanged:
+            lastError = nil
+        case .requiresApproval, .unavailable, .failed:
+            lastError = update.message
         }
         statusDidChange?()
     }
