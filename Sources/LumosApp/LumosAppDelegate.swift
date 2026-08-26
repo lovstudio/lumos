@@ -18,7 +18,7 @@ final class LumosAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        PrivilegedHelperManager.prepare()
+        model.refreshPrivilegedHelperStatus(presentApprovalSettings: true)
         installTerminationSignalHandlers()
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -100,7 +100,6 @@ final class LumosAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     private func showPopover() {
         guard let button = statusItem?.button else { return }
-        PrivilegedHelperManager.prepare()
         model.refreshAll()
         NSApplication.shared.activate(ignoringOtherApps: true)
         popover.show(
@@ -171,13 +170,17 @@ final class LumosAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         closePopover(nil)
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard statusItem != nil else { return }
+        model.refreshPrivilegedHelperStatus()
+    }
+
     func popoverDidClose(_ notification: Notification) {
         stopOutsideClickMonitoring()
     }
 
     func showSettings() {
         closePopover(nil)
-        PrivilegedHelperManager.prepare()
         model.refreshAll()
 
         if let settingsWindow {

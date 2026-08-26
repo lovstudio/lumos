@@ -160,6 +160,12 @@ private struct ControlSettingsView: View {
                         set: { model.setLowPowerMode($0) }
                     )
                 )
+
+                if model.privilegedHelperRepairState.isPresented {
+                    SettingsDivider()
+                    PrivilegedHelperRepairView(model: model)
+                        .padding(12)
+                }
             }
 
             SettingsCard(title: "立即操作") {

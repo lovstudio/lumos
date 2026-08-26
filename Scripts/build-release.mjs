@@ -19,6 +19,8 @@ const packageMetadata = JSON.parse(
 const version = packageMetadata.version;
 const buildNumber = String(packageMetadata.buildNumber);
 const shouldNotarize = process.argv.includes("--notarize");
+const helperMachServiceName = "ai.lovstudio.lumos.power-helper";
+const helperPlistName = `${helperMachServiceName}.plist`;
 
 if (!/^0\.[0-9]+\.[0-9]+$/.test(version)) {
   throw new Error(`Expected a pre-1.0 semantic version, received ${version}.`);
@@ -94,8 +96,8 @@ function assembleApplication() {
     join(resources, "LumosPrivilegedHelper"),
   );
   copyFileSync(
-    join(projectRoot, "Resources", "ai.lovstudio.lumos.privileged-helper.plist"),
-    join(daemons, "ai.lovstudio.lumos.privileged-helper.plist"),
+    join(projectRoot, "Resources", helperPlistName),
+    join(daemons, helperPlistName),
   );
   copyFileSync(iconPath, join(resources, "AppIcon.icns"));
 }
@@ -108,7 +110,7 @@ function signApplication() {
     "--options",
     "runtime",
     "--identifier",
-    "ai.lovstudio.lumos.privileged-helper",
+    helperMachServiceName,
     "--sign",
     signingIdentity,
     helperPath,

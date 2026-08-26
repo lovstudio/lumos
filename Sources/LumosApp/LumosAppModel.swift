@@ -19,6 +19,23 @@ struct GuardedApplicationState: Identifiable, Equatable {
     var isRunning: Bool { instanceCount > 0 }
 }
 
+enum PrivilegedHelperRepairState: Equatable {
+    case hidden
+    case checking
+    case approvalRequired
+    case restartRequired(String)
+    case unavailable(String)
+
+    var isPresented: Bool {
+        switch self {
+        case .approvalRequired, .restartRequired, .unavailable:
+            true
+        case .hidden, .checking:
+            false
+        }
+    }
+}
+
 @MainActor
 final class LumosAppModel: ObservableObject {
     @Published private(set) var preferences: LumosPreferences
@@ -36,6 +53,7 @@ final class LumosAppModel: ObservableObject {
     @Published private(set) var launchAtLoginState: LaunchAtLoginSnapshot
     @Published private(set) var runningApplications: [ApplicationCandidate] = []
     @Published private(set) var recentProcessEvents: [ProcessObservationEvent] = []
+    @Published private(set) var privilegedHelperRepairState: PrivilegedHelperRepairState = .hidden
     @Published private(set) var lastError: String?
 
     var statusDidChange: (() -> Void)?
@@ -51,6 +69,7 @@ final class LumosAppModel: ObservableObject {
     private var refreshTimer: Timer?
     private var refreshTimerInterval: TimeInterval?
     private var workspaceObservationTokens: [NSObjectProtocol] = []
+    private var privilegedHelperProbeGeneration = 0
 
     init(
         store: LumosPreferencesStore = LumosPreferencesStore(),
@@ -239,10 +258,61 @@ final class LumosAppModel: ObservableObject {
     }
 
     func refreshAll() {
+        refreshPrivilegedHelperStatus()
         lowPowerModeState = lowPowerModeController.snapshot()
         launchAtLoginState = launchAtLoginController.snapshot()
         refreshCorrectionSnapshots()
         safetyMonitor.refresh(reason: .manual)
+    }
+
+    func refreshPrivilegedHelperStatus(presentApprovalSettings: Bool = false) {
+        PrivilegedHelperManager.prepare(presentApprovalSettings: presentApprovalSettings)
+        privilegedHelperProbeGeneration &+= 1
+        let generation = privilegedHelperProbeGeneration
+
+        switch PrivilegedPowerRuntime.shared.mode {
+        case .legacyAuthorization:
+            privilegedHelperRepairState = .hidden
+        case .helperUnavailable(let reason):
+            privilegedHelperRepairState = switch reason {
+            case .approvalRequired:
+                .approvalRequired
+            case .incompleteInstallation, .registrationFailed, .unknownStatus:
+                .unavailable(reason.message)
+            }
+        case .helper(let configuration):
+            privilegedHelperRepairState = .checking
+            let probe = Task.detached(priority: .utility) {
+                PrivilegedPowerServiceClient.shared.pingResult(
+                    configuration: configuration,
+                    timeout: 1.5
+                )
+            }
+            Task { [weak self] in
+                let result = await probe.value
+                guard let self,
+                      self.privilegedHelperProbeGeneration == generation else { return }
+                switch result {
+                case .succeeded:
+                    self.privilegedHelperRepairState = .hidden
+                case .cancelled:
+                    self.privilegedHelperRepairState = .restartRequired(
+                        "系统辅助程序连接检测已取消。"
+                    )
+                case .failed(let diagnostic):
+                    self.privilegedHelperRepairState = .restartRequired(diagnostic)
+                }
+            }
+        }
+    }
+
+    func openPrivilegedHelperSettings() {
+        PrivilegedHelperManager.openSystemSettings()
+    }
+
+    func retryPrivilegedHelperConnection() {
+        PrivilegedPowerServiceClient.shared.invalidate()
+        refreshPrivilegedHelperStatus()
     }
 
     private func refreshCorrectionSnapshots() {
@@ -451,6 +521,7 @@ final class LumosAppModel: ObservableObject {
             lastError = nil
         case .cancelled, .failed:
             lastError = transition.message
+            refreshPrivilegedHelperStatus()
         }
         statusDidChange?()
     }

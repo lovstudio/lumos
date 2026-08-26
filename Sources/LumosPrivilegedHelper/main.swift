@@ -155,12 +155,23 @@ private final class LumosPrivilegedPowerService: NSObject, LumosPrivilegedPowerS
     }
 }
 
-private final class LumosPrivilegedListenerDelegate: NSObject, NSXPCListenerDelegate {
+private final class LumosPrivilegedListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
+    private let configuration: LumosPrivilegedServiceConfiguration
+    private let connectionLock = NSLock()
+    private var activeConnectionCount = 0
+
+    init(configuration: LumosPrivilegedServiceConfiguration) {
+        self.configuration = configuration
+    }
+
     func listener(
         _ listener: NSXPCListener,
         shouldAcceptNewConnection newConnection: NSXPCConnection
     ) -> Bool {
-        guard Self.isTrustedLumosClient(pid: newConnection.processIdentifier) else {
+        guard Self.isTrustedLumosClient(
+            pid: newConnection.processIdentifier,
+            expectedBundleIdentifier: configuration.hostBundleIdentifier
+        ) else {
             return false
         }
 
@@ -172,11 +183,33 @@ private final class LumosPrivilegedListenerDelegate: NSObject, NSXPCListenerDele
             with: LumosPrivilegedPowerServiceProtocol.self
         )
         newConnection.exportedObject = service
+        connectionLock.withLock { activeConnectionCount += 1 }
+        newConnection.invalidationHandler = { [weak self] in
+            self?.connectionDidInvalidate()
+        }
         newConnection.resume()
         return true
     }
 
-    private static func isTrustedLumosClient(pid: pid_t) -> Bool {
+    private func connectionDidInvalidate() {
+        let shouldScheduleExit = connectionLock.withLock { () -> Bool in
+            activeConnectionCount = max(0, activeConnectionCount - 1)
+            return activeConnectionCount == 0
+        }
+        guard shouldScheduleExit else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self,
+                  self.connectionLock.withLock({ self.activeConnectionCount == 0 })
+            else { return }
+            exit(EXIT_SUCCESS)
+        }
+    }
+
+    private static func isTrustedLumosClient(
+        pid: pid_t,
+        expectedBundleIdentifier: String
+    ) -> Bool {
         guard let helperInfo = signingInformation(for: nil),
               let clientInfo = signingInformation(for: pid),
               let helperTeam = helperInfo[kSecCodeInfoTeamIdentifier as String] as? String,
@@ -184,7 +217,7 @@ private final class LumosPrivilegedListenerDelegate: NSObject, NSXPCListenerDele
               !helperTeam.isEmpty,
               helperTeam == clientTeam,
               let identifier = clientInfo[kSecCodeInfoIdentifier as String] as? String,
-              identifier == "ai.lovstudio.lumos.dev" || identifier == "ai.lovstudio.lumos"
+              identifier == expectedBundleIdentifier
         else { return false }
         return true
     }
@@ -206,15 +239,38 @@ private final class LumosPrivilegedListenerDelegate: NSObject, NSXPCListenerDele
               let staticCode else { return nil }
 
         var information: CFDictionary?
-        guard SecCodeCopySigningInformation(staticCode, [], &information) == errSecSuccess else {
+        let informationFlags = SecCSFlags(rawValue: kSecCSSigningInformation)
+        guard SecCodeCopySigningInformation(
+            staticCode,
+            informationFlags,
+            &information
+        ) == errSecSuccess else {
             return nil
         }
         return information as? [String: Any]
     }
 }
 
-private let delegate = LumosPrivilegedListenerDelegate()
-private let listener = NSXPCListener(machServiceName: LumosPrivilegedService.machServiceName)
+private func requestedConfiguration(
+    arguments: [String]
+) -> LumosPrivilegedServiceConfiguration? {
+    guard let flagIndex = arguments.firstIndex(of: "--mach-service-name"),
+          arguments.indices.contains(flagIndex + 1)
+    else { return nil }
+    return LumosPrivilegedService.configuration(
+        forMachServiceName: arguments[flagIndex + 1]
+    )
+}
+
+guard let configuration = requestedConfiguration(arguments: CommandLine.arguments) else {
+    FileHandle.standardError.write(
+        Data("Lumos helper requires a recognized --mach-service-name.\n".utf8)
+    )
+    exit(EX_USAGE)
+}
+
+private let delegate = LumosPrivilegedListenerDelegate(configuration: configuration)
+private let listener = NSXPCListener(machServiceName: configuration.machServiceName)
 listener.delegate = delegate
 listener.resume()
 RunLoop.current.run()

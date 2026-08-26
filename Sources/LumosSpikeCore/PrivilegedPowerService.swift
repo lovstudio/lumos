@@ -1,8 +1,47 @@
 import Foundation
 
+public struct LumosPrivilegedServiceConfiguration: Equatable, Sendable {
+    public let hostBundleIdentifier: String
+    public let machServiceName: String
+    public let daemonPlistName: String
+
+    public init(
+        hostBundleIdentifier: String,
+        machServiceName: String,
+        daemonPlistName: String
+    ) {
+        self.hostBundleIdentifier = hostBundleIdentifier
+        self.machServiceName = machServiceName
+        self.daemonPlistName = daemonPlistName
+    }
+}
+
 public enum LumosPrivilegedService {
-    public static let machServiceName = "ai.lovstudio.lumos.privileged-helper"
-    public static let daemonPlistName = "ai.lovstudio.lumos.privileged-helper.plist"
+    public static let production = LumosPrivilegedServiceConfiguration(
+        hostBundleIdentifier: "ai.lovstudio.lumos",
+        machServiceName: "ai.lovstudio.lumos.power-helper",
+        daemonPlistName: "ai.lovstudio.lumos.power-helper.plist"
+    )
+
+    public static let development = LumosPrivilegedServiceConfiguration(
+        hostBundleIdentifier: "ai.lovstudio.lumos.dev",
+        machServiceName: "ai.lovstudio.lumos.dev.power-helper",
+        daemonPlistName: "ai.lovstudio.lumos.dev.power-helper.plist"
+    )
+
+    public static let allConfigurations = [production, development]
+
+    public static func configuration(
+        forHostBundleIdentifier bundleIdentifier: String?
+    ) -> LumosPrivilegedServiceConfiguration? {
+        allConfigurations.first { $0.hostBundleIdentifier == bundleIdentifier }
+    }
+
+    public static func configuration(
+        forMachServiceName machServiceName: String?
+    ) -> LumosPrivilegedServiceConfiguration? {
+        allConfigurations.first { $0.machServiceName == machServiceName }
+    }
 }
 
 @objc public protocol LumosPrivilegedPowerServiceProtocol {
@@ -25,10 +64,30 @@ public enum LumosPrivilegedService {
     )
 }
 
+public enum PrivilegedHelperUnavailableReason: Equatable, Sendable {
+    case approvalRequired
+    case incompleteInstallation
+    case registrationFailed(String)
+    case unknownStatus
+
+    public var message: String {
+        switch self {
+        case .approvalRequired:
+            "请先在“系统设置 > 通用 > 登录项与扩展”中允许 Lumos。"
+        case .incompleteInstallation:
+            "Lumos 系统辅助程序不完整，请重新安装。"
+        case .registrationFailed(let detail):
+            "系统控制初始化失败：\(detail)"
+        case .unknownStatus:
+            "无法确认 Lumos 系统辅助程序状态。"
+        }
+    }
+}
+
 public enum PrivilegedPowerRuntimeMode: Equatable, Sendable {
     case legacyAuthorization
-    case helper
-    case helperUnavailable(String)
+    case helper(LumosPrivilegedServiceConfiguration)
+    case helperUnavailable(PrivilegedHelperUnavailableReason)
 }
 
 /// Process-wide routing between the signed privileged helper used by bundled
@@ -59,15 +118,16 @@ public final class PrivilegedPowerRuntime: @unchecked Sendable {
         switch mode {
         case .legacyAuthorization:
             return PrivilegedCommandExecutor.execute(legacyCommand())
-        case .helper:
+        case .helper(let configuration):
             return PrivilegedPowerServiceClient.shared.activateClamshellProtection(
+                configuration: configuration,
                 ownerPID: ownerPID,
                 markerPath: markerPath,
                 deadline: deadline,
                 batteryFloorPercent: batteryFloorPercent
             )
-        case .helperUnavailable(let message):
-            return .failed(message)
+        case .helperUnavailable(let reason):
+            return .failed(reason.message)
         }
     }
 
@@ -77,10 +137,12 @@ public final class PrivilegedPowerRuntime: @unchecked Sendable {
         switch mode {
         case .legacyAuthorization:
             return PrivilegedCommandExecutor.execute(legacyCommand())
-        case .helper:
-            return PrivilegedPowerServiceClient.shared.restoreClamshellSleep()
-        case .helperUnavailable(let message):
-            return .failed(message)
+        case .helper(let configuration):
+            return PrivilegedPowerServiceClient.shared.restoreClamshellSleep(
+                configuration: configuration
+            )
+        case .helperUnavailable(let reason):
+            return .failed(reason.message)
         }
     }
 
@@ -92,13 +154,14 @@ public final class PrivilegedPowerRuntime: @unchecked Sendable {
         switch mode {
         case .legacyAuthorization:
             return PrivilegedCommandExecutor.execute(legacyCommand())
-        case .helper:
+        case .helper(let configuration):
             return PrivilegedPowerServiceClient.shared.setLowPowerMode(
                 enabled,
+                configuration: configuration,
                 powerSource: powerSource
             )
-        case .helperUnavailable(let message):
-            return .failed(message)
+        case .helperUnavailable(let reason):
+            return .failed(reason.message)
         }
     }
 }
@@ -137,26 +200,56 @@ public final class PrivilegedPowerServiceClient: @unchecked Sendable {
     }
 
     public func ping(timeout: TimeInterval = 2) -> Bool {
+        guard let configuration = LumosPrivilegedService.configuration(
+            forHostBundleIdentifier: Bundle.main.bundleIdentifier
+        ) else { return false }
+        return ping(configuration: configuration, timeout: timeout)
+    }
+
+    public func ping(
+        configuration: LumosPrivilegedServiceConfiguration,
+        timeout: TimeInterval = 2
+    ) -> Bool {
+        pingResult(configuration: configuration, timeout: timeout) == .succeeded
+    }
+
+    public func pingResult(
+        configuration: LumosPrivilegedServiceConfiguration,
+        timeout: TimeInterval = 2
+    ) -> PrivilegedCommandResult {
         let semaphore = DispatchSemaphore(value: 0)
-        let result = LockedValue(false)
-        guard let proxy = proxy(errorHandler: { _ in semaphore.signal() }) else {
-            return false
+        let box = PrivilegedReplyBox()
+        guard let proxy = proxy(
+            configuration: configuration,
+            errorHandler: { error in
+                box.store(
+                    status: -1,
+                    message: "无法连接系统辅助程序：\(error.localizedDescription)"
+                )
+                semaphore.signal()
+            }
+        ) else {
+            return .failed("系统辅助程序尚未可用。")
         }
         proxy.ping {
-            result.set($0)
+            box.store(status: $0 ? 0 : -1, message: $0 ? nil : "系统辅助程序拒绝响应。")
             semaphore.signal()
         }
-        guard semaphore.wait(timeout: .now() + timeout) == .success else { return false }
-        return result.get()
+        guard semaphore.wait(timeout: .now() + timeout) == .success else {
+            invalidate()
+            return .failed("系统辅助程序响应超时。")
+        }
+        return box.load() ?? .failed("系统辅助程序没有返回结果。")
     }
 
     public func activateClamshellProtection(
+        configuration: LumosPrivilegedServiceConfiguration,
         ownerPID: Int32,
         markerPath: String,
         deadline: Date,
         batteryFloorPercent: Int
     ) -> PrivilegedCommandResult {
-        call { proxy, reply in
+        call(configuration: configuration) { proxy, reply in
             proxy.activateClamshellProtection(
                 ownerPID: ownerPID,
                 markerPath: markerPath,
@@ -167,17 +260,20 @@ public final class PrivilegedPowerServiceClient: @unchecked Sendable {
         }
     }
 
-    public func restoreClamshellSleep() -> PrivilegedCommandResult {
-        call { proxy, reply in
+    public func restoreClamshellSleep(
+        configuration: LumosPrivilegedServiceConfiguration
+    ) -> PrivilegedCommandResult {
+        call(configuration: configuration) { proxy, reply in
             proxy.restoreClamshellSleep(reply: reply)
         }
     }
 
     public func setLowPowerMode(
         _ enabled: Bool,
+        configuration: LumosPrivilegedServiceConfiguration,
         powerSource: LowPowerModePowerSource
     ) -> PrivilegedCommandResult {
-        call { proxy, reply in
+        call(configuration: configuration) { proxy, reply in
             proxy.setLowPowerMode(
                 enabled: enabled,
                 powerSource: powerSource.rawValue,
@@ -187,6 +283,7 @@ public final class PrivilegedPowerServiceClient: @unchecked Sendable {
     }
 
     private func call(
+        configuration: LumosPrivilegedServiceConfiguration,
         timeout: TimeInterval = 8,
         _ operation: (
             LumosPrivilegedPowerServiceProtocol,
@@ -195,7 +292,7 @@ public final class PrivilegedPowerServiceClient: @unchecked Sendable {
     ) -> PrivilegedCommandResult {
         let semaphore = DispatchSemaphore(value: 0)
         let box = PrivilegedReplyBox()
-        guard let proxy = proxy(errorHandler: { error in
+        guard let proxy = proxy(configuration: configuration, errorHandler: { error in
             box.store(status: -1, message: "无法连接系统辅助程序：\(error.localizedDescription)")
             semaphore.signal()
         }) else {
@@ -215,13 +312,14 @@ public final class PrivilegedPowerServiceClient: @unchecked Sendable {
     }
 
     private func proxy(
+        configuration: LumosPrivilegedServiceConfiguration,
         errorHandler: @escaping @Sendable (Error) -> Void
     ) -> LumosPrivilegedPowerServiceProtocol? {
         let activeConnection = lock.withLock { () -> NSXPCConnection in
             if let connection { return connection }
 
             let created = NSXPCConnection(
-                machServiceName: LumosPrivilegedService.machServiceName,
+                machServiceName: configuration.machServiceName,
                 options: .privileged
             )
             created.remoteObjectInterface = NSXPCInterface(

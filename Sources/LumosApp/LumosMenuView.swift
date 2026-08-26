@@ -104,6 +104,12 @@ struct LumosMenuView: View {
                         set: { model.setLowPowerMode($0) }
                     )
                 )
+
+                if model.privilegedHelperRepairState.isPresented {
+                    Divider().padding(.leading, 43)
+                    PrivilegedHelperRepairView(model: model, compact: true)
+                        .padding(9)
+                }
             }
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

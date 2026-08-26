@@ -4,9 +4,9 @@
 
 Lumos 是一款面向长时间任务与 Agent 工作流的 macOS 低功耗防休眠菜单栏工具。
 
-当前版本：**v0.2.0** · Apple Silicon · macOS 14+
+当前版本：**v0.2.1** · Apple Silicon · macOS 14+
 
-[从 Lumos 官网下载](https://lumos.lovstudio.ai/) · [查看更新记录](CHANGELOG.md)
+[从 Lumos 官网下载](https://lumos.lovstudio.ai/) · [查看更新记录](CHANGELOG.md) · [阅读 v0.2.1 发布说明](docs/releases/v0.2.1.md)
 
 当前项目已完成首轮技术可行性 Spike、D1-D5 原生守护闭环，以及第一版 Apple 风格
 主面板与设置中心。产品定义以
@@ -65,12 +65,16 @@ npx lovstudio app lumos probe low-power-state
 `lovstudio app` 会根据 `packageManager` 使用 pnpm，并把上述命令转发到
 `package.json` scripts。`dev` 会增量构建并签名 `.build/LumosDev.app`，监听
 `Sources`、`Resources` 与 `Package.swift`；编译成功后平滑替换当前开发实例，编译失败时
-保留旧实例继续运行。再次运行 `dev` 会明确提示已有 watcher，不会创建第二个菜单栏图标。
+保留旧实例继续运行。再次运行 `dev` 会先接管同项目已有的 watcher，避免创建第二个菜单栏图标。
 
 首次运行开发 `.app` 时，macOS 会要求在“系统设置 > 通用 > 登录项与扩展”中允许 Lumos
 系统辅助程序。批准一次后，合盖运行与低功耗模式通过受限的 XPC 接口执行，不再为每次开关
 重复请求管理员密码。直接使用 `swift run lumos-app` 时没有 `.app` 包结构，因此仍使用逐次
 授权的兼容路径。
+
+若升级后 macOS 仍在运行旧版系统辅助程序，主面板与设置页会显示修复提示。用户可以直接
+打开登录项设置，关闭后重新允许 LumosPrivilegedHelper，再回到 Lumos 重新检测；连接恢复后
+提示会自动隐藏。
 
 当前开发界面包括：
 
@@ -93,7 +97,7 @@ npx lovstudio app lumos probe low-power-state
 正式版本通过 Developer ID 签名并由 Apple 公证：
 
 ```text
-https://lumos.lovstudio.ai/downloads/Lumos-0.2.0-arm64.dmg
+https://lumos.lovstudio.ai/downloads/Lumos-0.2.1-arm64.dmg
 ```
 
 打开 DMG 后，将 Lumos 拖入“应用程序”文件夹。首次启用合盖运行或低功耗切换时，

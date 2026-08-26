@@ -1,11 +1,18 @@
 import AppKit
 import Darwin
 import Foundation
+import LumosSpikeCore
 
 @main
 enum LumosAppEntry {
     @MainActor
     static func main() {
+        if CommandLine.arguments.contains("--diagnose-privileged-helper") {
+            PrivilegedHelperManager.prepare(presentApprovalSettings: false)
+            print("Lumos privileged helper runtime=\(runtimeDescription)")
+            return
+        }
+
         guard let instanceLock = LumosInstanceLock() else {
             print("Lumos dev is already running")
             return
@@ -16,6 +23,17 @@ enum LumosAppEntry {
         application.delegate = delegate
         application.run()
         withExtendedLifetime((delegate, instanceLock)) {}
+    }
+
+    private static var runtimeDescription: String {
+        switch PrivilegedPowerRuntime.shared.mode {
+        case .legacyAuthorization:
+            "legacy-authorization"
+        case .helper(let configuration):
+            "helper service=\(configuration.machServiceName) ping=\(PrivilegedPowerServiceClient.shared.pingResult(configuration: configuration))"
+        case .helperUnavailable(let reason):
+            "unavailable message=\(reason.message)"
+        }
     }
 }
 

@@ -978,13 +978,76 @@ final class LumosSpikeCoreTests: XCTestCase {
             return "/usr/bin/pmset -a disablesleep 0"
         }
 
-        runtime.configure(.helperUnavailable("请先完成一次系统初始化。"))
+        runtime.configure(.helperUnavailable(.approvalRequired))
         let result = runtime.restoreClamshellSleep(
             legacyCommand: legacyCommand()
         )
 
-        XCTAssertEqual(result, .failed("请先完成一次系统初始化。"))
+        XCTAssertEqual(
+            result,
+            .failed("请先在“系统设置 > 通用 > 登录项与扩展”中允许 Lumos。")
+        )
         XCTAssertFalse(legacyCommandWasEvaluated)
+    }
+
+    func testPrivilegedHelperUnavailableReasonsExposeActionableMessages() {
+        XCTAssertEqual(
+            PrivilegedHelperUnavailableReason.incompleteInstallation.message,
+            "Lumos 系统辅助程序不完整，请重新安装。"
+        )
+        XCTAssertEqual(
+            PrivilegedHelperUnavailableReason.registrationFailed("服务被拒绝").message,
+            "系统控制初始化失败：服务被拒绝"
+        )
+        XCTAssertEqual(
+            PrivilegedHelperUnavailableReason.unknownStatus.message,
+            "无法确认 Lumos 系统辅助程序状态。"
+        )
+    }
+
+    func testPrivilegedHelperConfigurationsAreIsolatedByHostBundle() {
+        let production = LumosPrivilegedService.production
+        let development = LumosPrivilegedService.development
+
+        XCTAssertEqual(
+            LumosPrivilegedService.configuration(
+                forHostBundleIdentifier: production.hostBundleIdentifier
+            ),
+            production
+        )
+        XCTAssertEqual(
+            LumosPrivilegedService.configuration(
+                forHostBundleIdentifier: development.hostBundleIdentifier
+            ),
+            development
+        )
+        XCTAssertNotEqual(production.machServiceName, development.machServiceName)
+        XCTAssertNotEqual(production.daemonPlistName, development.daemonPlistName)
+        XCTAssertNil(
+            LumosPrivilegedService.configuration(
+                forHostBundleIdentifier: "ai.lovstudio.lumos.unknown"
+            )
+        )
+    }
+
+    func testPrivilegedHelperConfigurationRejectsLegacySharedServiceName() {
+        XCTAssertEqual(
+            LumosPrivilegedService.configuration(
+                forMachServiceName: LumosPrivilegedService.production.machServiceName
+            ),
+            LumosPrivilegedService.production
+        )
+        XCTAssertEqual(
+            LumosPrivilegedService.configuration(
+                forMachServiceName: LumosPrivilegedService.development.machServiceName
+            ),
+            LumosPrivilegedService.development
+        )
+        XCTAssertNil(
+            LumosPrivilegedService.configuration(
+                forMachServiceName: "ai.lovstudio.lumos.privileged-helper"
+            )
+        )
     }
 
     func testWakeLeaseEngineSharesAssertionUntilFinalReceiptReleases() throws {

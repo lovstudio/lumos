@@ -21,6 +21,9 @@ const stagingPath = join(buildRoot, "LumosDev.app.next");
 const lockPath = join(buildRoot, "lumos-dev-watch.lock");
 const sourcesPath = join(projectRoot, "Sources");
 const resourcesPath = join(projectRoot, "Resources");
+const helperMachServiceName = "ai.lovstudio.lumos.dev.power-helper";
+const helperPlistName = `${helperMachServiceName}.plist`;
+const buildOnly = process.argv.includes("--build-only");
 
 let appProcess = null;
 let rebuilding = false;
@@ -37,8 +40,12 @@ process.on("SIGTERM", () => shutdown(143));
 process.on("exit", cleanupLock);
 
 await rebuildAndRestart("initial build");
-startWatching();
-console.log("Lumos dev watch ready — save a Swift file to rebuild and restart.");
+if (buildOnly) {
+  console.log(`Lumos dev app built without launching: ${appPath}`);
+} else {
+  startWatching();
+  console.log("Lumos dev watch ready — save a Swift file to rebuild and restart.");
+}
 
 async function acquireLock() {
   if (existsSync(lockPath)) {
@@ -175,7 +182,7 @@ async function rebuildAndRestart(reason) {
     assembleSignedAppBundle();
     await stopApp();
     replaceAppBundle();
-    launchApp();
+    if (!buildOnly) launchApp();
   } finally {
     rebuilding = false;
     if (rebuildQueued && !shuttingDown) {
@@ -202,8 +209,8 @@ function assembleSignedAppBundle() {
     join(resources, "LumosPrivilegedHelper"),
   );
   copyFileSync(
-    join(resourcesPath, "ai.lovstudio.lumos.privileged-helper.plist"),
-    join(daemons, "ai.lovstudio.lumos.privileged-helper.plist"),
+    join(resourcesPath, helperPlistName),
+    join(daemons, helperPlistName),
   );
 
   const identity = codesignIdentity();
@@ -213,7 +220,7 @@ function assembleSignedAppBundle() {
     identity,
     "--timestamp=none",
     "--identifier",
-    "ai.lovstudio.lumos.privileged-helper",
+    helperMachServiceName,
     join(resources, "LumosPrivilegedHelper"),
   ]);
   runSync("codesign", [
